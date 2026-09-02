@@ -2,9 +2,9 @@
   "version": "V2.2.5",
   "displayVersion": "V2.2.5",
   "label": "V2.2.5",
-  "build": "V2.2.5-SIGNATURE-EXPORT-STORAGE-FIX",
-  "releasedAt": "2026-09-02T18:05:00+07:00",
-  "type": "signature-export-storage-fix",
-  "notes": "Hotfix trên bản production V2.2.2. Sửa lỗi sau khi ký tên không mở/xuất PDF do V2.2 local-first lưu trùng full envelope ở primary local session và sagsV22LocalCheckpoint, làm biểu mẫu có chữ ký dễ chạm localStorage quota. V2.2.5 chỉ lưu vật lý một bản envelope; checkpoint được compact thành metadata+reference nhưng vẫn tương thích ngược qua virtual hydrate. Trước XUẤT hệ thống flush state hiện tại và khi đang ở đúng assignment thì không switch/reload lại cùng session. Quota guard chỉ hoạt động trong cửa sổ mở xuất, không che lỗi autosave khi đang nhập liệu. Giữ nguyên V2.2.2 ARR->DEP; không đưa các bản takeover thử nghiệm V2.2.3/V2.2.4 vào production.",
+  "build": "V2.2.5-SIGNATURE-EXPORT-STORAGE-FIX-R2",
+  "releasedAt": "2026-09-02T18:40:00+07:00",
+  "type": "signature-export-storage-fix-update-repair",
+  "notes": "R2 sửa cơ chế cập nhật từ V2.2.2 lên V2.2.5 trên thiết bị đang thiếu dung lượng: Service Worker mới cài nhẹ, không pre-cache lại toàn bộ app trong giai đoạn install nên tránh nhân đôi cache cũ. Sau khi người dùng bấm UPDATE mới activate, xóa cache release cũ rồi tải/cache lại theo nhu cầu. Giữ fix chữ ký/PDF V2.2.5, V2.2 local-first và V2.2.2 ARR-DEP. Gói deploy PowerShell kèm theo cập nhật index.html server-side để detector cũ và R2 đều nhận đúng build.",
   "message": "V2.2.5"
 }

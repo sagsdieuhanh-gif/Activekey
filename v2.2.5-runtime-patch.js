@@ -1,5 +1,5 @@
 /* E-REPORT/SAGS V2.2.5 · SIGNATURE EXPORT STORAGE FIX
- * BUILD: V2.2.5-SIGNATURE-EXPORT-STORAGE-FIX
+ * BUILD: V2.2.5-SIGNATURE-EXPORT-STORAGE-FIX-R2
  * Base in production: V2.2.2 + V2.2 local-first autosave.
  *
  * Fix:
@@ -18,7 +18,7 @@
 (function(root){
   'use strict';
 
-  const BUILD='V2.2.5-SIGNATURE-EXPORT-STORAGE-FIX';
+  const BUILD='V2.2.5-SIGNATURE-EXPORT-STORAGE-FIX-R2';
   if(root.__SAGS_V225_SIGNATURE_EXPORT===BUILD)return;
   root.__SAGS_V225_SIGNATURE_EXPORT=BUILD;
 

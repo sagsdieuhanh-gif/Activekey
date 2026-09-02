@@ -1,22 +1,21 @@
 {
-  "package": "E_REPORT_SAGS_V2.2.5_SIGNATURE_EXPORT_FIX",
+  "package": "E_REPORT_SAGS_V2.2.5_UPDATE_REPAIR_R2",
+  "displayVersion": "V2.2.5",
+  "build": "V2.2.5-SIGNATURE-EXPORT-STORAGE-FIX-R2",
   "productionBase": "V2.2.2-DEP-RECEIVE-AFTER-ARR",
-  "build": "V2.2.5-SIGNATURE-EXPORT-STORAGE-FIX",
-  "changedFiles": [
+  "fixes": [
+    "lightweight Service Worker install to avoid duplicate cache during update",
+    "storage checkpoint compaction/signature export fix",
+    "atomic PowerShell deployment with server index patch",
+    "online verification after push"
+  ],
+  "changedRuntimeFiles": [
     "v2.2.5-runtime-patch.js",
     "version.json",
-    "HDSD-V2.2.5.md",
-    "service-worker.js"
+    "service-worker.js",
+    "HDSD-V2.2.5.md"
   ],
-  "fixes": [
-    "Compact duplicate V2.2 local checkpoint envelopes",
-    "Pre-export flush after signature",
-    "Avoid same-session reload before export",
-    "Export-window-only quota guard"
-  ],
-  "notIncluded": [
-    "V2.2.3 parallel DEP experiment",
-    "V2.2.4 emergency takeover experiment",
-    "password reset"
+  "deployAlsoPatches": [
+    "index.html"
   ]
 }
