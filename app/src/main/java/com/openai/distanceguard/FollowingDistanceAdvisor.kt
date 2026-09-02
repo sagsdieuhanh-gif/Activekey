@@ -116,7 +116,7 @@ class FollowingDistanceAdvisor {
             }
         }
 
-        /** Minimum model-error envelope requested for V12 long-range operation. */
+        /** Minimum model-error envelope requested for V13 long-range operation. */
         fun minimumLongRangeUncertainty(distanceM: Float): Float {
             val d = distanceM.coerceAtLeast(0f)
             return when {

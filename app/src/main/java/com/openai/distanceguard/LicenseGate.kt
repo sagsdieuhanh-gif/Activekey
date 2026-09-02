@@ -11,7 +11,7 @@ import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
 
 /**
- * Offline V12 access gate.
+ * Offline V13 access gate. The DG12 payload/device-code salt is intentionally retained for V12/V13 key compatibility.
  *
  * - New installs receive five minutes of foreground trial time.
  * - After trial expiration, protected camera/vision functions require an administrator-issued key.

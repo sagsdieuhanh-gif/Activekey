@@ -1,106 +1,61 @@
-# HƯỚNG DẪN SỬ DỤNG — TRUNGKIEN V12.0.0 (R2)
+# HƯỚNG DẪN SỬ DỤNG — TRUNGKIEN V13.2 FULL ADAS
 
-## 1. Lần chạy đầu
-1. Cài app và cấp CAMERA; nên cấp VỊ TRÍ CHÍNH XÁC để có GPS speed.
-2. Bản dùng thử chạy tối đa 5 phút foreground.
-3. Nếu muốn kích hoạt ngay: `CÀI ĐẶT -> BẢN QUYỀN / KEY`, gửi `MÃ THIẾT BỊ` cho admin, nhận key và dán vào ô kích hoạt.
+## 1. Gắn điện thoại
+- Cố định điện thoại chắc chắn, camera sau nhìn thẳng theo hướng xe.
+- Không cần căn theo một “đường chân trời” trên màn hình; V13 không hiển thị horizon.
+- Lần đầu hoặc sau khi đổi vị trí gắn, bấm **AUTO GÓC** và chạy thẳng vài giây để hệ thống ổn định.
 
-## 2. Gắn điện thoại
-- Gắn chắc chắn, camera sau nhìn thẳng về phía trước.
-- Tránh để điện thoại rung hoặc nghiêng thay đổi liên tục.
-- Nhập đúng chiều cao camera nếu cần trong `HÌNH HỌC CAMERA`.
-- Bấm `AUTO GÓC` sau khi cố định điện thoại và cho xe/điện thoại hướng theo đường vài giây.
-- V12 R2 không còn vẽ đường chân trời trên camera. Phần đo dùng hình học mặt đường, điểm chân xe, lane và góc camera/IMU ở bên trong.
+## 2. Vùng bỏ đầu xe
+Vào **CÀI ĐẶT → VÙNG BỎ QUA ĐẦU XE**. Kéo vạch ngang tới ngay phía trên phần capo/đầu xe xuất hiện trong camera rồi bấm **LƯU VÙNG**. Phần dưới vạch không được dùng làm mục tiêu đo. Không có mức 20% cố định.
 
-## 3. Loại phần đầu xe/ca-pô
-1. Vào `CÀI ĐẶT -> VÙNG BỎ QUA ĐẦU XE`.
-2. Trên camera xuất hiện vạch kéo ngang.
-3. Kéo vạch tới ngay phía trên phần đầu xe/ca-pô nhìn thấy trong hình.
-4. Vùng phủ phía dưới là vùng loại trừ.
-5. Bấm `LƯU VÙNG`.
-6. App tự xóa thang bù cũ nếu biên thay đổi đáng kể và tự học lại.
+## 3. Cách đọc giao diện ADAS
+- Hai biên xanh ngọc: ego-lane đang theo dõi.
+- Vùng xanh nhẹ + chevrons: hành lang/tâm làn.
+- Nhãn lớn phía trên xe: lead vehicle hiện tại.
+- Xanh ngọc: trạng thái ổn định/an toàn tương đối.
+- Vàng: cần chú ý, khoảng cách/lấn làn.
+- Đỏ: nguy cơ cao/quá gần/collision.
+- Xe hai bên bình thường có thể không được vẽ; chỉ threat/cut-in mới nổi bật.
 
-`RESET VÙNG ĐẦU XE` trả về mốc mặc định để chỉnh lại.
+Khi lane yếu hoặc chỉ đang ước lượng, đường lane sẽ mờ/nét đứt hơn. Đây là chủ ý để không tạo cảm giác chắc chắn giả.
 
-## 4. LANE HYBRID
-- `LÀN OK`: lane đủ tin cậy.
-- `LÀN ƯỚC LƯỢNG`: chỉ có một biên hoặc lane đang được giữ ngắn hạn; dùng để hỗ trợ tracking nhưng không tự phát cảnh báo lệch làn mạnh.
-- `LÀN: CHƯA NHẬN DIỆN`: chưa có hình học đủ tin cậy.
+## 4. Khoảng cách 0–100 m
+- <10 m: ưu tiên phản ứng nhanh; khi đủ confidence có thể hiển thị chi tiết hơn.
+- 10–40 m: vùng đo/tracking chính.
+- 40–60 m: far range.
+- 60–100 m: long range, UI làm tròn mạnh hơn và thường có dấu `~`.
 
-## 5. FRONT FIRST + LONG RANGE 100 m
-- Khung/target đo chính ưu tiên ô tô nằm trong hành lang trước mặt.
-- Xe máy/xe đạp bên trái/phải không được phép giành target chính chỉ vì ở gần hơn.
-- Khi tốc độ từ khoảng 60 km/h trở lên và máy không nóng, V12 luân phiên một lượt `LONG 100m` phóng lớn vùng trung tâm để tăng khả năng bắt xe nhỏ ở 60–100 m.
-- 60–100 m chủ yếu là vùng phát hiện sớm: số đo hiển thị dạng `~80 m`, `~100 m`, không coi là số đo tuyệt đối.
-- 1–30 m vẫn là vùng được ưu tiên cao nhất cho TTC/cảnh báo va chạm.
+Camera đơn trên điện thoại không phải radar/LiDAR. Ở 60–100 m V13 dùng khoảng cách ước lượng + biên sai số bảo thủ, mục tiêu chính là phát hiện/ước lượng xe ở xa và không tuyên bố độ chính xác giả.
 
-## 6. Khoảng cách an toàn theo tốc độ
-Trong điều kiện đường khô, tầm nhìn tốt và không có biển quy định cự ly khác, V12 dùng bảng tham chiếu:
-- V = 60 km/h: 35 m.
-- 60 < V ≤ 80 km/h: 55 m.
-- 80 < V ≤ 100 km/h: 70 m.
-- 100 < V ≤ 120 km/h: 100 m.
-- Dưới 60 km/h: không ép một trị số pháp lý cố định; tiếp tục dùng TTC/time-gap động.
+## 5. Giữ khoảng cách theo tốc độ
+Khi GPS và range đủ tin cậy, app đánh giá cự ly tham chiếu theo dải tốc độ đã cấu hình. V13 dùng **cận dưới của khoảng đo** (distance - uncertainty) trước khi thông báo “đủ khoảng cách”, vì vậy số đo không chắc chắn sẽ ở trạng thái đang xác nhận thay vì báo an toàn.
 
-App không xác nhận đủ khoảng cách chỉ từ số đo trung tâm. Điều kiện xác nhận là:
+## 6. Xe trái/phải lấn làn
+V13 theo dõi motion của xe lane bên:
+- bình thường: không làm rối màn hình;
+- WATCH: tiến gần biên lane;
+- DỰ ĐOÁN LẤN LÀN: xu hướng cắt lane đã đủ bằng chứng;
+- ĐANG VÀO LÀN: mép xe đã rất sát/đang cắt vạch.
 
-`khoảng cách đo - sai số ước tính >= khoảng cách yêu cầu`
+Cảnh báo dựa vào TLC, khoảng cách, closing speed và lane confidence; không chỉ dựa vào một frame.
 
-Phải ổn định khoảng 2,5 giây mới đọc: `Bạn đã giữ đủ khoảng cách an toàn.`
+## 7. Cảnh báo giọng nói
+Ưu tiên giọng Việt, TTS nữ miền Nam nếu engine Android có voice phù hợp. Mốc khoảng cách gồm 20 / 10 / 5 / 4 / 3 / 2 / 1 m. App không xếp hàng hàng loạt câu thấp ưu tiên; cảnh báo nguy hiểm có quyền ngắt câu thông tin.
 
-Nếu toàn bộ dải sai số vẫn thấp hơn yêu cầu, app có thể đọc: `Khoảng cách chưa an toàn, cần tối thiểu ... mét.`
+## 8. BIỂN BÁO AI
+Nút **BIỂN BÁO AI** là công tắc riêng. Khi TẮT, pipeline biển báo/OCR không chạy để giảm nhiệt. Khi BẬT, V13 ưu tiên biển tốc độ tối đa và biển bắt đầu/hết khu đông dân cư. Biển phải được xác nhận qua nhiều frame trước khi áp dụng.
 
-Sai số được tăng theo khoảng cách/độ tin cậy; vùng 60–100 m thường có biên lớn hơn vùng gần.
+## 9. Nhiệt máy
+V13 tự chuyển NORMAL → BALANCED → HOT → VERY_HOT dựa trên thermal status và nhiệt độ pin. Khi nóng, app giảm nhịp inference/render trước, ưu tiên giữ lead/lane. Khi xe đứng yên và không có nguy cơ, workload cũng tự hạ.
 
-## 7. ĐỌC BIỂN BÁO AI
-Có nút riêng trên màn hình chính:
-- `BIỂN BÁO AI: TẮT`: module sign/OCR đóng hoàn toàn, không chạy nền.
-- `BIỂN BÁO AI: BẬT`: mới chạy nhận diện biển báo đơn giản.
+## 10. DEBUG ADAS (ẩn)
+Nhấn giữ chip trạng thái trên góc trên màn hình để bật/tắt DEBUG. Debug chỉ dành cho test, hiển thị Track ID/FPS/lane confidence/TTC/range quality/thermal. Khi DEBUG bật, app ghi CSV 1 Hz vào bộ nhớ riêng của app; không ghi video.
 
-V12 R2 ưu tiên:
-- P.127 tốc độ tối đa: đọc số 20/30/40/50/60/70/80/90/100/110/120.
-- R.420 bắt đầu khu đông dân cư.
-- R.421 hết khu đông dân cư.
+## 11. Bản quyền
+- Cài mới: dùng thử 5 phút foreground.
+- Hết trial: mở **BẢN QUYỀN / KEY**, gửi MÃ THIẾT BỊ cho Admin.
+- Admin tạo key bằng app Admin riêng rồi gửi chuỗi key để kích hoạt.
+- V12/V13 dùng chung hệ key hiện tại.
 
-Kết quả phải lặp qua nhiều frame mới được xác nhận. Khi đọc P.127, giới hạn được hiện cạnh tốc độ GPS; nếu GPS vượt giới hạn ổn định, app đọc `Bạn đang vượt tốc độ cho phép.` Khi trở lại phù hợp sau trạng thái vượt tốc, app đọc một lần `Tốc độ đã phù hợp.`
-
-Tắt `BIỂN BÁO AI` không ảnh hưởng xe phía trước, khoảng cách, lane, cut-in hoặc TTC.
-
-## 8. Cut-in trái/phải
-- `THEO DÕI LẤN LÀN`: bắt đầu có xu hướng vào lane.
-- `DỰ ĐOÁN LẤN LÀN`: quỹ đạo dự kiến cắt biên lane trong thời gian gần.
-- `ĐANG VÀO LÀN`: nguy cơ cao hơn, ưu tiên cảnh báo.
-- TLC = thời gian dự kiến tới lúc cắt biên làn; TTC = thời gian va chạm ước tính theo tốc độ áp sát.
-
-## 9. Tự hiệu chỉnh khoảng cách
-Không nhập mốc thật bằng tay. App chỉ học khi nhiều điều kiện cùng đạt: target ổn định, lane tin cậy, nguồn metric độc lập mới và tương thích, không phải vùng đầu xe, không phải detection dự đoán.
-
-Bấm `AUTO SAI SỐ` để xem số mẫu/hệ số hoặc xóa dữ liệu tự học.
-
-## 10. Cảnh báo khoảng cách gần
-- >20 m: chủ yếu hiển thị, không nói liên tục.
-- 20 m: chú ý.
-- 10 m: cảnh báo khoảng cách dưới 10 m.
-- 5 m: cảnh báo còn 5 m.
-- 4 m: không đọc riêng.
-- 3 m: quá gần.
-- 2 m: nguy cơ va chạm.
-- 1 m: nguy hiểm, phanh ngay.
-- TTC có quyền nâng cấp cảnh báo sớm hơn mốc khoảng cách.
-
-## 11. Giảm nóng máy
-- THERMAL GUARD tự hạ tần suất xử lý khi máy nóng.
-- LONG 100m chỉ chạy luân phiên khi máy ở trạng thái bình thường.
-- `BIỂN BÁO AI` tắt thì Sign Core/OCR không chạy.
-- Khi nguy cơ tăng, app tạm tăng nhịp cho pipeline an toàn.
-- `CÀI ĐẶT -> MÀN HÌNH TIẾT KIỆM` giảm sáng khi chạy lâu.
-- Khi Android báo `RẤT NÓNG`, app tự hạ sáng tạm thời và ưu tiên các chức năng an toàn chính.
-
-## 12. Kích hoạt key
-- Mở `CÀI ĐẶT -> BẢN QUYỀN / KEY`.
-- Gửi `MÃ THIẾT BỊ` cho admin.
-- Dán chuỗi key được cấp -> `KÍCH HOẠT`.
-- Key sai thiết bị, sai chữ ký hoặc hết hạn sẽ bị từ chối.
-
-## 13. Lưu ý an toàn
-Ứng dụng là công cụ hỗ trợ thử nghiệm, không thay thế quan sát của người lái, biển báo thực tế, phanh tự động hay hệ thống ADAS được chứng nhận. Điều kiện mưa/sương mù/đường trơn/đèo dốc cần khoảng cách lớn hơn mức tham chiếu. Không thao tác kéo/cài đặt khi xe đang chạy.
+## 12. Lưu ý sử dụng
+V13 là công cụ hỗ trợ quan sát thử nghiệm trên điện thoại, không phải hệ thống ADAS/radar được chứng nhận và không điều khiển phanh/vô-lăng. Luôn ưu tiên quan sát thực tế, biển báo thật và điều kiện giao thông.

@@ -175,6 +175,14 @@ class VehicleRangeFusion(
         var quality = stable.quality
         var uncertainty = stable.uncertaintyM
 
+        // At 60-100 m a car can be only a few detector pixels tall. Do not imply MEDIUM/HIGH
+        // precision before several mutually consistent observations have accumulated.
+        if (pinholeDistance >= 60f && stable.samples < 4) {
+            quality = RangeQuality.APPROXIMATE
+        } else if (pinholeDistance >= 85f && quality == RangeQuality.HIGH) {
+            quality = RangeQuality.MEDIUM
+        }
+
         val compatibleLead = lead?.takeIf {
             it.confidence >= 0.34f &&
                 it.distanceM.isFinite() && it.distanceM in 1.5f..120f &&
@@ -183,7 +191,11 @@ class VehicleRangeFusion(
 
         if (compatibleLead != null) {
             val delta = abs(compatibleLead.distanceM - pinholeDistance)
-            val tolerance = max(3.0f, pinholeDistance * 0.22f).coerceAtMost(11f)
+            val tolerance = when {
+                pinholeDistance >= 80f -> max(6.0f, pinholeDistance * 0.18f).coerceAtMost(15f)
+                pinholeDistance >= 50f -> max(4.0f, pinholeDistance * 0.20f).coerceAtMost(12f)
+                else -> max(3.0f, pinholeDistance * 0.22f).coerceAtMost(11f)
+            }
             if (delta <= tolerance) {
                 // Use more lead weight far away where 1-2 bbox pixels can move the pinhole result
                 // several metres. Never let the neural lead dominate the visible vision target.
@@ -199,11 +211,12 @@ class VehicleRangeFusion(
             }
         }
 
-        // V12 long-range guard: detector jitter alone understates monocular error at 60-100 m.
+        // V13 long-range guard: detector jitter alone understates monocular error at 60-100 m.
         // Keep a conservative envelope so legal-gap advice never declares SAFE from a falsely precise
         // point estimate.
         val baseFloor = FollowingDistanceAdvisor.minimumLongRangeUncertainty(finalDistance)
         val qualityFloor = when {
+            finalDistance >= 80f && quality == RangeQuality.APPROXIMATE -> max(baseFloor, finalDistance * 0.12f).coerceAtMost(15f)
             finalDistance >= 60f && quality == RangeQuality.APPROXIMATE -> max(baseFloor, finalDistance * 0.10f).coerceAtMost(12f)
             finalDistance >= 60f && quality == RangeQuality.MEDIUM -> max(baseFloor, finalDistance * 0.08f).coerceAtMost(10f)
             else -> baseFloor

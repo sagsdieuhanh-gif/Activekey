@@ -99,6 +99,8 @@ class TargetSelector(
     private var lastLockedSeenNs: Long = 0L
     private var switchCandidateId: Int = -1
     private var switchCandidateSinceNs: Long = 0L
+    private data class CandidateLife(var firstSeenNs: Long, var lastSeenNs: Long, var hits: Int)
+    private val candidateLife = mutableMapOf<Int, CandidateLife>()
 
     /**
      * Selects one forward target and keeps it locked by tracker ID. A challenger must remain clearly
@@ -110,7 +112,11 @@ class TargetSelector(
             if (detection.classId !in VehicleClasses.roadVehicles) return@mapNotNull null
             val minRoadY = (estimator.horizonYNorm() + 0.004f).coerceIn(0.10f, 0.72f)
             if (detection.bottom < minRoadY) return@mapNotNull null
-            if (!isInsideLaneAdjusted(detection.centerX, detection.bottom, lane)) return@mapNotNull null
+            val membership = laneMembership(detection, lane)
+            val fourWheel = detection.classId == VehicleClasses.CAR ||
+                detection.classId == VehicleClasses.BUS || detection.classId == VehicleClasses.TRUCK
+            val minOverlap = if (membership.reliable) { if (fourWheel) 0.18f else 0.32f } else 0f
+            if (!membership.centerInside && membership.overlap < minOverlap) return@mapNotNull null
             val raw = estimator.distanceMeters(detection.centerX, detection.bottom) ?: return@mapNotNull null
             val corrected = corrector.correct(raw)
             TargetMeasurement(
@@ -121,6 +127,7 @@ class TargetSelector(
             )
         }
 
+        updateCandidateLife(candidates, nowNs)
         if (candidates.isEmpty()) {
             if (lastLockedSeenNs != 0L && nowNs - lastLockedSeenNs > LOCK_MISSING_GRACE_NS) clearLock()
             return null
@@ -144,13 +151,33 @@ class TargetSelector(
             if (lockedTrackId > 0 && lastLockedSeenNs != 0L && nowNs - lastLockedSeenNs <= LOCK_MISSING_GRACE_NS) {
                 return null
             }
-            lock(best.first, nowNs)
-            return best.first
+            val ready = scored
+                .filter { initialLockReady(it.first, nowNs, lane) }
+                .maxByOrNull { it.second }
+                ?: return null
+            lock(ready.first, nowNs)
+            return ready.first
         }
 
         lastLockedSeenNs = nowNs
         lockedFallbackDetection = current.first.detection
-        val challenger = best.takeIf { it.first.detection.trackId != current.first.detection.trackId }
+
+        // A two-wheel vehicle that has genuinely moved deep into our lane can be safety-critical even
+        // when its normal class penalty keeps it below a four-wheel car in the generic score table.
+        // Consider that cut-in explicitly; otherwise use the normal highest-scoring challenger.
+        val currentFourWheelForUrgent = current.first.detection.classId in setOf(VehicleClasses.CAR, VehicleClasses.BUS, VehicleClasses.TRUCK)
+        val urgentTwoWheel = if (currentFourWheelForUrgent) {
+            scored.asSequence()
+                .filter { it.first.detection.trackId != current.first.detection.trackId }
+                .filter { it.first.detection.classId == VehicleClasses.MOTORCYCLE || it.first.detection.classId == VehicleClasses.BICYCLE }
+                .filter { candidate ->
+                    val m = laneMembership(candidate.first.detection, lane)
+                    m.centrality >= 0.70f && m.overlap >= 0.62f &&
+                        candidate.first.correctedDistanceM <= current.first.correctedDistanceM * 0.64f
+                }
+                .minByOrNull { it.first.correctedDistanceM }
+        } else null
+        val challenger = urgentTwoWheel ?: best.takeIf { it.first.detection.trackId != current.first.detection.trackId }
         if (challenger == null) {
             clearSwitchCandidate()
             return current.first
@@ -158,8 +185,14 @@ class TargetSelector(
 
         val challengerFourWheel = challenger.first.detection.classId in setOf(VehicleClasses.CAR, VehicleClasses.BUS, VehicleClasses.TRUCK)
         val currentFourWheel = current.first.detection.classId in setOf(VehicleClasses.CAR, VehicleClasses.BUS, VehicleClasses.TRUCK)
-        val muchCloser = challenger.first.correctedDistanceM <= current.first.correctedDistanceM * 0.68f && (challengerFourWheel || !currentFourWheel)
-        val clearlyBetter = challenger.second >= current.second * SWITCH_SCORE_RATIO
+        val challengerMembership = laneMembership(challenger.first.detection, lane)
+        val deepTwoWheelCutIn = !challengerFourWheel && currentFourWheel &&
+            challengerMembership.centrality >= 0.70f && challengerMembership.overlap >= 0.62f &&
+            challenger.first.correctedDistanceM <= current.first.correctedDistanceM * 0.64f
+        val muchCloser = challenger.first.correctedDistanceM <= current.first.correctedDistanceM * 0.66f &&
+            (challengerFourWheel || !currentFourWheel || deepTwoWheelCutIn)
+        val clearlyBetter = challenger.second >= current.second * SWITCH_SCORE_RATIO &&
+            (challengerFourWheel || !currentFourWheel || deepTwoWheelCutIn)
         if (muchCloser || clearlyBetter) {
             val challengerId = stableId(challenger.first.detection)
             if (switchCandidateId != challengerId) {
@@ -175,30 +208,97 @@ class TargetSelector(
         return current.first
     }
 
+    private fun updateCandidateLife(candidates: List<TargetMeasurement>, nowNs: Long) {
+        for (target in candidates) {
+            val id = stableId(target.detection)
+            val life = candidateLife[id]
+            if (life == null || nowNs - life.lastSeenNs > CANDIDATE_GAP_RESET_NS) {
+                candidateLife[id] = CandidateLife(nowNs, nowNs, 1)
+            } else {
+                life.lastSeenNs = nowNs
+                life.hits = (life.hits + 1).coerceAtMost(30)
+            }
+        }
+        candidateLife.entries.removeAll { nowNs - it.value.lastSeenNs > CANDIDATE_TTL_NS }
+    }
+
+    /**
+     * A new lead must persist for a few detector updates before it is allowed to own the HUD.
+     * Very close, well-centred vehicles lock faster; off-centre/two-wheel candidates need longer.
+     */
+    private fun initialLockReady(target: TargetMeasurement, nowNs: Long, lane: LaneState?): Boolean {
+        val d = target.detection
+        if (d.predicted) return false
+        val life = candidateLife[stableId(d)] ?: return false
+        val membership = laneMembership(d, lane)
+        val fourWheel = d.classId == VehicleClasses.CAR || d.classId == VehicleClasses.BUS || d.classId == VehicleClasses.TRUCK
+        val dwellNs = when {
+            target.correctedDistanceM <= 12f && membership.centrality >= 0.48f -> 90_000_000L
+            target.correctedDistanceM >= 60f && fourWheel -> 330_000_000L
+            fourWheel && membership.centrality >= 0.58f && membership.overlap >= 0.56f -> 170_000_000L
+            fourWheel -> 250_000_000L
+            else -> 380_000_000L
+        }
+        val minHits = when {
+            target.correctedDistanceM <= 12f -> 2
+            target.correctedDistanceM >= 60f -> 4
+            else -> 3
+        }
+        return life.hits >= minHits && nowNs - life.firstSeenNs >= dwellNs
+    }
+
     private fun targetScore(target: TargetMeasurement, lane: LaneState?): Float {
         val d = target.detection
-        val y = d.bottom.coerceIn(0.2f, 1f)
-        val bounds = lane?.takeIf { it.confidence >= 0.34f }?.boundsAt(y) ?: laneBoundsAt(y)
-        val center = (bounds.first + bounds.second) * 0.5f
-        val halfWidth = ((bounds.second - bounds.first) * 0.5f).coerceAtLeast(0.05f)
-        val centrality = (1f - kotlin.math.abs(d.centerX - center) / halfWidth).coerceIn(0f, 1f)
+        val membership = laneMembership(d, lane)
+        val centrality = membership.centrality
+        val overlap = membership.overlap
         val nearScore = (1f - target.correctedDistanceM / 110f).coerceIn(0f, 1f)
         val areaScore = ((d.width * d.height) / 0.10f).coerceIn(0f, 1f)
-        val predictedPenalty = if (d.predicted) 0.13f else 0f
+        val predictedPenalty = if (d.predicted) 0.18f else 0f
         val fourWheel = d.classId == VehicleClasses.CAR || d.classId == VehicleClasses.BUS || d.classId == VehicleClasses.TRUCK
         val classPriority = when (d.classId) {
-            VehicleClasses.CAR, VehicleClasses.BUS, VehicleClasses.TRUCK -> 1.05f
-            VehicleClasses.MOTORCYCLE -> 0.18f
-            VehicleClasses.BICYCLE -> 0.04f
+            VehicleClasses.CAR, VehicleClasses.BUS, VehicleClasses.TRUCK -> 1.18f
+            VehicleClasses.MOTORCYCLE -> 0.16f
+            VehicleClasses.BICYCLE -> 0.02f
             else -> 0f
         }
-        val frontBonus = if (fourWheel && centrality >= 0.32f) 0.58f else 0f
-        val longRangeFrontBonus = if (fourWheel && target.correctedDistanceM in 55f..115f && centrality >= 0.55f) 0.34f else 0f
-        val twoWheelOffCenterPenalty = if (!fourWheel && centrality < 0.58f) 0.72f else 0f
-        // V12 FRONT FIRST: centre/lane alignment beats simple nearness. A tiny side motorcycle must
-        // not steal the primary range target from a clearly visible car directly ahead.
-        return centrality * 1.42f + nearScore * 0.72f + d.score.coerceIn(0f, 1f) * 0.30f +
-            areaScore * 0.18f + classPriority + frontBonus + longRangeFrontBonus - twoWheelOffCenterPenalty - predictedPenalty
+        val frontBonus = if (fourWheel && centrality >= 0.36f && overlap >= 0.38f) 0.76f else 0f
+        val longRangeFrontBonus = if (fourWheel && target.correctedDistanceM in 45f..120f && centrality >= 0.55f) 0.46f else 0f
+        val twoWheelOffCenterPenalty = if (!fourWheel && (centrality < 0.58f || overlap < 0.50f)) 1.05f else 0f
+        val laneConfidenceBonus = if (membership.reliable) overlap * 0.35f else 0f
+
+        // V13 LEAD FIRST: lane membership and ego-lane center dominate detector confidence and raw
+        // nearness. A small motorcycle in the adjacent lane cannot steal the lead merely because
+        // its detector score is higher or its ground projection is a little closer.
+        return centrality * 1.55f + overlap * 0.92f + laneConfidenceBonus + nearScore * 0.48f +
+            d.score.coerceIn(0f, 1f) * 0.24f + areaScore * 0.12f + classPriority +
+            frontBonus + longRangeFrontBonus - twoWheelOffCenterPenalty - predictedPenalty
+    }
+
+    private data class LaneMembership(
+        val centrality: Float,
+        val overlap: Float,
+        val centerInside: Boolean,
+        val reliable: Boolean,
+    )
+
+    private fun laneMembership(d: Detection, lane: LaneState?): LaneMembership {
+        val y = d.bottom.coerceIn(0.20f, 1f)
+        val dynamic = lane?.takeIf { it.left != null && it.right != null && it.confidence >= 0.30f }?.boundsAt(y)
+        val bounds = dynamic ?: laneBoundsAt(y).let { fallback ->
+            val shift = estimator.roadVanishingXNorm() - 0.5f
+            (fallback.first + shift).coerceIn(0f, 1f) to (fallback.second + shift).coerceIn(0f, 1f)
+        }
+        val laneWidth = (bounds.second - bounds.first).coerceAtLeast(0.05f)
+        val laneCenter = (bounds.first + bounds.second) * 0.5f
+        val halfWidth = (laneWidth * 0.5f).coerceAtLeast(0.04f)
+        val centrality = (1f - kotlin.math.abs(d.centerX - laneCenter) / halfWidth).coerceIn(0f, 1f)
+        val boxWidth = d.width.coerceAtLeast(0.012f)
+        val overlapWidth = (minOf(d.right, bounds.second) - maxOf(d.left, bounds.first)).coerceAtLeast(0f)
+        val overlap = (overlapWidth / boxWidth).coerceIn(0f, 1f)
+        val margin = if (dynamic != null) laneWidth * 0.08f else 0f
+        val centerInside = d.centerX in (bounds.first - margin)..(bounds.second + margin)
+        return LaneMembership(centrality, overlap, centerInside, dynamic != null)
     }
 
     private fun lock(target: TargetMeasurement, nowNs: Long) {
@@ -223,30 +323,20 @@ class TargetSelector(
         lockedFallbackDetection = null
         lastLockedSeenNs = 0L
         clearSwitchCandidate()
+        candidateLife.clear()
     }
 
-    private fun isInsideLaneAdjusted(x: Float, y: Float, lane: LaneState?): Boolean {
-        val minRoadY = (estimator.horizonYNorm() + 0.004f).coerceIn(0.10f, 0.72f)
-        if (y < minRoadY) return false
-        val dynamic = lane?.takeIf { it.confidence >= 0.42f }?.boundsAt(y)
-        if (dynamic != null) {
-            // Keep a small edge buffer so a motorcycle entering the lane is not lost exactly at the marking.
-            val margin = 0.045f
-            return x in (dynamic.first - margin)..(dynamic.second + margin)
-        }
-        val (left0, right0) = laneBoundsAt(y)
-        val shift = estimator.roadVanishingXNorm() - 0.5f
-        return x in (left0 + shift).coerceIn(0f, 1f)..(right0 + shift).coerceIn(0f, 1f)
-    }
 
     val activeTrackId: Int get() = lockedTrackId
 
     fun reset() = clearLock()
 
     companion object {
-        private const val LOCK_MISSING_GRACE_NS = 600_000_000L
-        private const val SWITCH_CONFIRM_NS = 480_000_000L
-        private const val SWITCH_SCORE_RATIO = 1.25f
+        private const val LOCK_MISSING_GRACE_NS = 850_000_000L
+        private const val SWITCH_CONFIRM_NS = 620_000_000L
+        private const val SWITCH_SCORE_RATIO = 1.32f
+        private const val CANDIDATE_GAP_RESET_NS = 450_000_000L
+        private const val CANDIDATE_TTL_NS = 1_600_000_000L
 
         /** Lane trapezoid: narrow near horizon, wide at the bottom. */
         fun laneBoundsAt(y: Float): Pair<Float, Float> {

@@ -4,7 +4,7 @@ import android.content.Context
 
 /** User-adjustable lower-camera exclusion zone used to reject the vehicle's own bonnet/hood. */
 class HoodExclusionStore(context: Context) {
-    private val prefs = context.getSharedPreferences("hood_guard_v12", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences("hood_guard_v12", Context.MODE_PRIVATE) // keep V12 prefs so V13 preserves the user's boundary
 
     var boundaryY: Float
         get() = prefs.getFloat(KEY_BOUNDARY, DEFAULT_BOUNDARY).coerceIn(MIN_BOUNDARY, MAX_BOUNDARY)
@@ -33,13 +33,20 @@ object HoodExclusionFilter {
     ): List<Detection> {
         val b = boundaryY.coerceIn(HoodExclusionStore.MIN_BOUNDARY, HoodExclusionStore.MAX_BOUNDARY)
         return detections.filter keep@{ d ->
-            if (d.trackId > 0 && d.trackId == lockedForwardTrackId) return@keep true
             val h = d.height.coerceAtLeast(0.001f)
             val overlap = (d.bottom - maxOf(d.top, b)).coerceAtLeast(0f) / h
             val beginsInside = d.top >= b - 0.070f
             val squatBottomObject = d.bottom >= 0.94f && d.height <= 0.24f
-            val mostlyHood = overlap >= 0.52f && (beginsInside || squatBottomObject)
-            !mostlyHood
+            val overwhelminglyHood = overlap >= 0.62f && (beginsInside || squatBottomObject)
+
+            // V13 never lets a fully hood-contained false positive survive merely because it was
+            // accidentally locked on a previous frame. A genuine close lead may extend below the
+            // boundary only when a substantial part of its box still exists above the exclusion line.
+            if (d.trackId > 0 && d.trackId == lockedForwardTrackId) {
+                val substantialAbove = d.top <= b - 0.10f && overlap < 0.78f
+                return@keep substantialAbove && !overwhelminglyHood
+            }
+            !overwhelminglyHood
         }
     }
 }

@@ -11,8 +11,22 @@ import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
+import java.util.Locale
 import kotlin.math.max
+import kotlin.math.min
 
+/**
+ * V13 driver-facing ADAS overlay.
+ *
+ * The detector may track many objects internally, but the screen deliberately stays quiet:
+ * - ego-lane corridor + chevrons,
+ * - one locked lead vehicle,
+ * - at most one meaningful side threat on each side,
+ * - a pedestrian only when it is actually relevant to the vehicle path.
+ *
+ * Raw model names, confidence, tracker IDs and calibration diagnostics belong in the debug/status
+ * screen, not in the driving view.
+ */
 class DetectionOverlayView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -35,39 +49,68 @@ class DetectionOverlayView @JvmOverloads constructor(
     private var hoodBoundaryY = HoodExclusionStore.DEFAULT_BOUNDARY
     private var hoodEditMode = false
     private var hoodBoundaryListener: ((Float) -> Unit)? = null
+    private var debugEnabled = false
+    private var debugLines: List<String> = emptyList()
 
-    private val subtlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val laneBoundaryPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = dp(1.5f)
-        color = Color.argb(150, 255, 255, 255)
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        strokeWidth = dp(3f)
+    }
+    private val laneFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+    private val chevronPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        strokeWidth = dp(2f)
     }
     private val targetPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.SQUARE
+        strokeJoin = Paint.Join.ROUND
         strokeWidth = dp(3f)
     }
-    private val lanePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = dp(2f)
-        color = Color.argb(185, 255, 255, 255)
-        pathEffect = DashPathEffect(floatArrayOf(dp(8f), dp(8f)), 0f)
+    private val tagBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.argb(224, 8, 14, 18)
     }
-    private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = dp(14f)
+    private val tagBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp(1.5f)
+    }
+    private val tagTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = dp(18f)
         typeface = android.graphics.Typeface.DEFAULT_BOLD
         color = Color.WHITE
-        setShadowLayer(dp(3f), 0f, dp(1f), Color.BLACK)
+        textAlign = Paint.Align.CENTER
     }
-    private val markerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
+    private val smallTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = dp(11f)
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        color = Color.WHITE
+        textAlign = Paint.Align.CENTER
+        setShadowLayer(dp(2f), 0f, dp(1f), Color.BLACK)
     }
     private val hoodShadePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.argb(85, 255, 80, 80)
+        color = Color.argb(105, 20, 20, 20)
     }
     private val hoodLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = dp(3f)
-        color = Color.rgb(255, 193, 7)
+        color = AMBER
+    }
+    private val debugBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.argb(175, 0, 0, 0)
+    }
+    private val debugTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = dp(10f)
+        typeface = android.graphics.Typeface.MONOSPACE
+        color = Color.WHITE
     }
 
     fun update(
@@ -95,7 +138,7 @@ class DetectionOverlayView @JvmOverloads constructor(
         this.pedestrianRisk = pedestrianRisk
         this.sideHazards = sideHazards
         this.laneState = lane
-        if (lane.left != null && lane.right != null && lane.confidence >= 0.18f) {
+        if (lane.left != null && lane.right != null && lane.confidence >= 0.20f) {
             lastReliableLane = lane
             lastReliableLaneAtMs = SystemClock.elapsedRealtime()
         }
@@ -120,72 +163,325 @@ class DetectionOverlayView @JvmOverloads constructor(
         invalidate()
     }
 
+    /** Hidden admin/debug HUD. Normal driving mode never shows model/track diagnostics. */
+    fun setDebugStatus(enabled: Boolean, lines: List<String> = emptyList()) {
+        debugEnabled = enabled
+        debugLines = if (enabled) lines.take(8) else emptyList()
+        invalidate()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (width <= 0 || height <= 0) return
 
         drawLane(canvas)
-        if (hoodEditMode) drawHoodEditor(canvas)
-
-        val selected = target?.detection
-        val selectedPedestrian = pedestrianHazard?.measurement?.detection
-        val sideTrackIds = sideHazards.map { it.trackId }.filter { it > 0 }.toSet()
-        for (d in detections) {
-            if (d == selected || d == selectedPedestrian || d.trackId in sideTrackIds) continue
-            // V12 keeps the driving view quiet: background side vehicles are tracked internally but
-            // are drawn only after they become a cut-in/side hazard. Pedestrians remain visible.
-            if (d.classId != VehicleClasses.PERSON) continue
-            val rect = mapRect(d)
-            subtlePaint.color = Color.argb(200, 255, 210, 80)
-            canvas.drawRoundRect(rect, dp(6f), dp(6f), subtlePaint)
-        }
-
         drawSideHazards(canvas)
+        drawRelevantPedestrian(canvas)
+        drawLead(canvas)
+        if (hoodEditMode) drawHoodEditor(canvas)
+        if (debugEnabled) drawDebugPanel(canvas)
+    }
 
-        if (selectedPedestrian != null) {
-            val rect = mapRect(selectedPedestrian)
-            val c = when (pedestrianRisk) {
-                PedestrianRiskLevel.DANGER -> Color.rgb(255, 60, 60)
-                PedestrianRiskLevel.WARNING -> Color.rgb(255, 150, 40)
-                PedestrianRiskLevel.INFO -> Color.rgb(255, 215, 80)
-                PedestrianRiskLevel.CLEAR -> Color.WHITE
-            }
-            targetPaint.color = c
-            markerPaint.color = c
-            canvas.drawRoundRect(rect, dp(8f), dp(8f), targetPaint)
-            val p = mapPoint(selectedPedestrian.centerX, selectedPedestrian.bottom)
-            canvas.drawCircle(p.first, p.second, dp(6f), markerPaint)
-            val d = pedestrianTrack?.distanceM ?: pedestrianHazard?.measurement?.correctedDistanceM
-            val suffix = if (pedestrianHazard?.inVehiclePath == true) " • TRONG HƯỚNG XE" else " • SÁT HƯỚNG XE"
-            val label = d?.let { "NGƯỜI  ${formatDistance(it, pedestrianRangeQuality)}$suffix" } ?: "NGƯỜI$suffix"
-            canvas.drawText(label, rect.left.coerceAtLeast(dp(8f)), (rect.top - dp(8f)).coerceAtLeast(dp(20f)), labelPaint)
+    private fun drawLead(canvas: Canvas) {
+        val selected = target?.detection ?: return
+        val rect = mapRect(selected)
+        val color = colorForRisk(risk)
+        targetPaint.color = color
+        targetPaint.strokeWidth = dp(if (risk >= RiskLevel.WARNING) 3.5f else 3f)
+
+        // V13 uses a lightweight ADAS foot/corner marker rather than a heavy full detection box.
+        drawVehicleBracket(canvas, rect, targetPaint)
+
+        val distanceM = track?.distanceM ?: target?.correctedDistanceM ?: return
+        val distanceText = formatAdasDistance(distanceM, rangeQuality)
+        drawDistanceTag(canvas, rect.centerX(), rect.top - dp(10f), distanceText, color, large = true)
+    }
+
+    private fun drawRelevantPedestrian(canvas: Canvas) {
+        val hazard = pedestrianHazard ?: return
+        if (pedestrianRisk == PedestrianRiskLevel.CLEAR) return
+        val detection = hazard.measurement.detection
+        val rect = mapRect(detection)
+        val color = when (pedestrianRisk) {
+            PedestrianRiskLevel.DANGER -> RED
+            PedestrianRiskLevel.WARNING -> AMBER
+            PedestrianRiskLevel.INFO -> AMBER
+            PedestrianRiskLevel.CLEAR -> return
         }
+        targetPaint.color = color
+        targetPaint.strokeWidth = dp(2.5f)
+        drawVehicleBracket(canvas, rect, targetPaint)
+        val distance = pedestrianTrack?.distanceM ?: hazard.measurement.correctedDistanceM
+        val text = "NGƯỜI • ${formatAdasDistance(distance, pedestrianRangeQuality)}"
+        drawDistanceTag(canvas, rect.centerX(), rect.top - dp(7f), text, color, large = false)
+    }
 
-        if (selected != null) {
-            val c = colorForRisk(risk)
-            targetPaint.color = c
-            markerPaint.color = c
-            val rect = mapRect(selected)
-            canvas.drawRoundRect(rect, dp(8f), dp(8f), targetPaint)
-            val p = mapPoint(selected.centerX, selected.bottom)
-            canvas.drawCircle(p.first, p.second, dp(6f), markerPaint)
+    private fun drawSideHazards(canvas: Canvas) {
+        if (sideHazards.isEmpty()) return
 
-            val distanceText = track?.let { formatDistance(it.distanceM, rangeQuality) }
-                ?: formatDistance(target?.correctedDistanceM ?: 0f, rangeQuality)
-            val cal = target?.correctionConfidence?.takeIf { it >= 0.15f }?.let { "  CAL ${(it * 100).toInt()}%" }.orEmpty()
-            val id = selected.trackId.takeIf { it > 0 }?.let { "  #$it" }.orEmpty()
-            val label = "${VehicleClasses.label(selected.classId)}  $distanceText$id$cal"
-            canvas.drawText(label, rect.left.coerceAtLeast(dp(8f)), (rect.top - dp(8f)).coerceAtLeast(dp(20f)), labelPaint)
+        // The risk engine keeps histories for every object. The UI shows only the strongest threat
+        // on each side, which prevents a busy multi-lane road from turning into a wall of boxes.
+        val strongest = sideHazards
+            .groupBy { it.side }
+            .mapNotNull { (_, list) ->
+                list.maxWithOrNull(
+                    compareBy<SideCollisionHazard> { it.level.ordinal }
+                        .thenBy { -(if (it.timeToLaneCrossingSeconds.isFinite()) it.timeToLaneCrossingSeconds else 99f) }
+                        .thenBy { -it.distanceM }
+                )
+            }
+
+        for (hazard in strongest) {
+            if (hazard.level == SideCollisionLevel.CLEAR) continue
+            val rect = mapRect(hazard.detection)
+            val color = when (hazard.level) {
+                SideCollisionLevel.DANGER -> RED
+                SideCollisionLevel.WARNING -> AMBER
+                SideCollisionLevel.CAUTION -> AMBER
+                SideCollisionLevel.CLEAR -> CYAN
+            }
+            targetPaint.color = color
+            targetPaint.strokeWidth = dp(if (hazard.level >= SideCollisionLevel.WARNING) 3f else 2.2f)
+            drawVehicleBracket(canvas, rect, targetPaint)
+
+            drawDistanceTag(
+                canvas,
+                rect.centerX(),
+                rect.top - dp(6f),
+                formatAdasDistance(hazard.distanceM, null),
+                color,
+                large = false,
+            )
+
+            val motionText = when (hazard.motionState) {
+                SideMotionState.CUT_IN_IMMINENT -> "ĐANG VÀO LÀN"
+                SideMotionState.CUT_IN_PREDICTED -> "CÓ XU HƯỚNG LẤN LÀN"
+                SideMotionState.WATCH -> "THEO DÕI LẤN LÀN"
+                SideMotionState.NORMAL -> if (hazard.side == LaneSide.LEFT) "XE BÊN TRÁI" else "XE BÊN PHẢI"
+            }
+            smallTextPaint.color = color
+            canvas.drawText(motionText, rect.centerX(), (rect.bottom + dp(17f)).coerceAtMost(height - dp(8f)), smallTextPaint)
+
+            if (hazard.motionState != SideMotionState.NORMAL) {
+                drawCutInVector(canvas, hazard, rect, color)
+            }
         }
     }
 
+
+    private fun drawCutInVector(canvas: Canvas, hazard: SideCollisionHazard, rect: RectF, color: Int) {
+        val y = hazard.detection.bottom.coerceIn(0.42f, min(hoodBoundaryY - 0.01f, 0.98f))
+        val bounds = laneState.takeIf { it.left != null && it.right != null && it.confidence >= 0.25f }
+            ?.boundsAt(y) ?: TargetSelector.laneBoundsAt(y)
+        val boundaryX = if (hazard.side == LaneSide.LEFT) bounds.first else bounds.second
+        val start = mapPoint(rectCenterXNorm(hazard.detection), y)
+        val end = mapPoint(boundaryX, y)
+        val vectorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = dp(2f)
+            strokeCap = Paint.Cap.ROUND
+            pathEffect = DashPathEffect(floatArrayOf(dp(6f), dp(5f)), 0f)
+            this.color = color
+        }
+        canvas.drawLine(start.first, start.second, end.first, end.second, vectorPaint)
+    }
+
+    private fun rectCenterXNorm(d: Detection): Float = d.centerX.coerceIn(0f, 1f)
+
+    private fun drawVehicleBracket(canvas: Canvas, rect: RectF, paint: Paint) {
+        if (rect.width() <= dp(4f) || rect.height() <= dp(4f)) return
+        val inset = min(rect.width() * 0.12f, dp(9f))
+        val x1 = rect.left + inset
+        val x2 = rect.right - inset
+        val y = rect.bottom
+        val leg = min(max(rect.height() * 0.20f, dp(7f)), dp(18f))
+        canvas.drawLine(x1, y, x2, y, paint)
+        canvas.drawLine(x1, y, x1, y - leg, paint)
+        canvas.drawLine(x2, y, x2, y - leg, paint)
+
+        // Tiny top corner hints make the selected object unambiguous without enclosing it in a box.
+        val corner = min(rect.width() * 0.15f, dp(12f))
+        val top = rect.top
+        canvas.drawLine(rect.left, top, rect.left + corner, top, paint)
+        canvas.drawLine(rect.left, top, rect.left, top + corner, paint)
+        canvas.drawLine(rect.right, top, rect.right - corner, top, paint)
+        canvas.drawLine(rect.right, top, rect.right, top + corner, paint)
+    }
+
+    private fun drawDistanceTag(
+        canvas: Canvas,
+        centerX: Float,
+        baselineY: Float,
+        text: String,
+        accent: Int,
+        large: Boolean,
+    ) {
+        tagTextPaint.textSize = dp(if (large) 18f else 14f)
+        val metrics = tagTextPaint.fontMetrics
+        val textW = tagTextPaint.measureText(text)
+        val padX = dp(if (large) 12f else 9f)
+        val padY = dp(if (large) 6f else 5f)
+        val tagW = textW + padX * 2f
+        val tagH = (metrics.bottom - metrics.top) + padY * 2f
+        val cx = centerX.coerceIn(tagW * 0.5f + dp(4f), width - tagW * 0.5f - dp(4f))
+        val bottom = baselineY.coerceIn(tagH + dp(4f), height - dp(4f))
+        val rect = RectF(cx - tagW * 0.5f, bottom - tagH, cx + tagW * 0.5f, bottom)
+        tagBackgroundPaint.color = Color.argb(224, 8, 14, 18)
+        tagBorderPaint.color = accent
+        canvas.drawRoundRect(rect, dp(4f), dp(4f), tagBackgroundPaint)
+        canvas.drawRoundRect(rect, dp(4f), dp(4f), tagBorderPaint)
+        // Accent bar mimics a dedicated ADAS range card and stays readable over bright sky/road.
+        val bar = RectF(rect.left, rect.top, rect.left + dp(4f), rect.bottom)
+        val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = accent }
+        canvas.drawRoundRect(bar, dp(2f), dp(2f), accentPaint)
+        val textY = rect.centerY() - (metrics.ascent + metrics.descent) * 0.5f
+        tagTextPaint.color = Color.WHITE
+        canvas.drawText(text, rect.centerX() + dp(2f), textY, tagTextPaint)
+    }
+
+    private fun formatAdasDistance(distanceM: Float, quality: RangeQuality?): String {
+        val d = distanceM.coerceIn(0f, 120f)
+        val prefix = if (quality == RangeQuality.APPROXIMATE) "~" else ""
+        return when {
+            d >= 50f -> "$prefix${(kotlin.math.round(d / 5f) * 5f).toInt()} M"
+            d >= 20f -> "$prefix${kotlin.math.round(d).toInt()} M"
+            d >= 10f -> "$prefix${kotlin.math.round(d * 2f).toInt() / 2f}".trimTrailingZero() + " M"
+            else -> prefix + String.format(Locale("vi", "VN"), "%.1f M", d)
+        }
+    }
+
+    private fun String.trimTrailingZero(): String = if (endsWith(".0")) dropLast(2) else this
+
+    private fun drawLane(canvas: Canvas) {
+        val current = laneState
+        val currentReliable = current.left != null && current.right != null && current.confidence >= 0.20f
+        val held = lastReliableLane?.takeIf {
+            SystemClock.elapsedRealtime() - lastReliableLaneAtMs <= LANE_VISUAL_HOLD_MS
+        }
+        val state = if (currentReliable) current else held?.copy(
+            departureLevel = LaneDepartureLevel.CENTERED,
+            departureSide = null,
+            confidence = minOf(held.confidence, 0.22f),
+        ) ?: return
+
+        val left = state.left ?: return
+        val right = state.right ?: return
+        val yStart = 0.50f
+        val yEnd = min(hoodBoundaryY - 0.012f, 0.965f)
+        if (yEnd <= yStart + 0.06f) return
+
+        val laneColor = when (state.departureLevel) {
+            LaneDepartureLevel.WARNING -> RED
+            LaneDepartureLevel.CAUTION -> AMBER
+            LaneDepartureLevel.CENTERED, LaneDepartureLevel.UNAVAILABLE -> CYAN
+        }
+        val confidenceAlpha = if (currentReliable) {
+            (105 + 105 * state.confidence.coerceIn(0f, 1f)).toInt().coerceIn(105, 210)
+        } else 90
+
+        // Corridor fill: enough to communicate the current lane, but intentionally transparent so
+        // road markings and vehicles remain visible.
+        val corridor = Path()
+        var y = yStart
+        var first = true
+        while (y <= yEnd) {
+            val p = mapPoint(left.xAt(y), y)
+            if (first) { corridor.moveTo(p.first, p.second); first = false } else corridor.lineTo(p.first, p.second)
+            y += 0.018f
+        }
+        y = yEnd
+        while (y >= yStart) {
+            val p = mapPoint(right.xAt(y), y)
+            corridor.lineTo(p.first, p.second)
+            y -= 0.018f
+        }
+        corridor.close()
+        laneFillPaint.color = Color.argb(if (currentReliable) 34 else 18, Color.red(laneColor), Color.green(laneColor), Color.blue(laneColor))
+        canvas.drawPath(corridor, laneFillPaint)
+
+        laneBoundaryPaint.color = Color.argb(confidenceAlpha, Color.red(laneColor), Color.green(laneColor), Color.blue(laneColor))
+        laneBoundaryPaint.strokeWidth = dp(if (state.departureLevel == LaneDepartureLevel.WARNING) 4f else 3f)
+        laneBoundaryPaint.pathEffect = if (!currentReliable || state.confidence < 0.34f || state.isEstimated) {
+            DashPathEffect(floatArrayOf(dp(10f), dp(7f)), 0f)
+        } else null
+        drawCurve(canvas, left, laneBoundaryPaint, yStart, yEnd)
+        drawCurve(canvas, right, laneBoundaryPaint, yStart, yEnd)
+        laneBoundaryPaint.pathEffect = null
+
+        chevronPaint.color = Color.argb(if (currentReliable) 150 else 70, 0, 230, 215)
+        drawCenterChevrons(canvas, state, yStart, yEnd)
+
+        if (state.departureLevel == LaneDepartureLevel.WARNING) {
+            val sideText = if (state.departureSide == LaneSide.LEFT) "LỆCH LÀN TRÁI" else "LỆCH LÀN PHẢI"
+            val p = mapPoint((left.xAt(0.68f) + right.xAt(0.68f)) * 0.5f, 0.68f)
+            smallTextPaint.color = RED
+            canvas.drawText(sideText, p.first, p.second, smallTextPaint)
+        }
+    }
+
+    private fun drawCenterChevrons(canvas: Canvas, state: LaneState, yStart: Float, yEnd: Float) {
+        val left = state.left ?: return
+        val right = state.right ?: return
+        val positions = floatArrayOf(0.60f, 0.68f, 0.76f, 0.84f)
+        for (y in positions) {
+            if (y !in yStart..yEnd) continue
+            val l = left.xAt(y)
+            val r = right.xAt(y)
+            val center = (l + r) * 0.5f
+            val laneW = (r - l).coerceAtLeast(0.08f)
+            val half = laneW * 0.11f
+            val tipY = (y - 0.028f).coerceAtLeast(yStart)
+            val tipCenter = (left.xAt(tipY) + right.xAt(tipY)) * 0.5f
+            val a = mapPoint(center - half, y)
+            val b = mapPoint(tipCenter, tipY)
+            val c = mapPoint(center + half, y)
+            val p = Path().apply {
+                moveTo(a.first, a.second)
+                lineTo(b.first, b.second)
+                lineTo(c.first, c.second)
+            }
+            canvas.drawPath(p, chevronPaint)
+        }
+    }
+
+    private fun drawCurve(canvas: Canvas, curve: LaneCurve, paint: Paint, yStart: Float, yEnd: Float) {
+        val path = Path()
+        var first = true
+        var y = yStart
+        while (y <= yEnd) {
+            val p = mapPoint(curve.xAt(y), y)
+            if (first) { path.moveTo(p.first, p.second); first = false } else path.lineTo(p.first, p.second)
+            y += 0.016f
+        }
+        canvas.drawPath(path, paint)
+    }
+
+
+    private fun drawDebugPanel(canvas: Canvas) {
+        if (debugLines.isEmpty()) return
+        val padding = dp(8f)
+        val lineHeight = dp(13f)
+        val panelWidth = (width * 0.58f).coerceAtMost(dp(310f))
+        val panelHeight = padding * 2f + lineHeight * debugLines.size
+        val left = dp(8f)
+        val top = dp(58f)
+        canvas.drawRoundRect(
+            RectF(left, top, left + panelWidth, top + panelHeight),
+            dp(7f), dp(7f), debugBackgroundPaint,
+        )
+        var y = top + padding + dp(10f)
+        for (line in debugLines) {
+            canvas.drawText(line.take(54), left + padding, y, debugTextPaint)
+            y += lineHeight
+        }
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!hoodEditMode) return super.onTouchEvent(event)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> {
                 val y = sourceYFromScreen(event.y).coerceIn(
-                    HoodExclusionStore.MIN_BOUNDARY, HoodExclusionStore.MAX_BOUNDARY
+                    HoodExclusionStore.MIN_BOUNDARY, HoodExclusionStore.MAX_BOUNDARY,
                 )
                 hoodBoundaryY = y
                 hoodBoundaryListener?.invoke(y)
@@ -209,15 +505,15 @@ class DetectionOverlayView @JvmOverloads constructor(
             hoodShadePaint,
         )
         canvas.drawLine(left.first, left.second, right.first, right.second, hoodLinePaint)
-        val oldSize = labelPaint.textSize
-        labelPaint.textSize = dp(13f)
+        smallTextPaint.color = Color.WHITE
+        smallTextPaint.textAlign = Paint.Align.LEFT
         canvas.drawText(
-            "KÉO VẠCH NÀY • PHẦN DƯỚI KHÔNG ĐO",
+            "PHẦN DƯỚI KHÔNG PHÂN TÍCH • KÉO VẠCH ĐỂ CHỈNH",
             left.first.coerceAtLeast(dp(8f)) + dp(8f),
             (left.second - dp(10f)).coerceAtLeast(dp(22f)),
-            labelPaint,
+            smallTextPaint,
         )
-        labelPaint.textSize = oldSize
+        smallTextPaint.textAlign = Paint.Align.CENTER
     }
 
     private fun sourceYFromScreen(screenY: Float): Float {
@@ -229,132 +525,6 @@ class DetectionOverlayView @JvmOverloads constructor(
         return ((screenY - offsetY) / scaledH).coerceIn(0f, 1f)
     }
 
-
-    private fun drawSideHazards(canvas: Canvas) {
-        for (hazard in sideHazards) {
-            val rect = mapRect(hazard.detection)
-            val c = when (hazard.level) {
-                SideCollisionLevel.DANGER -> Color.rgb(255, 70, 70)
-                SideCollisionLevel.WARNING -> Color.rgb(255, 150, 40)
-                SideCollisionLevel.CAUTION -> Color.rgb(255, 205, 70)
-                SideCollisionLevel.CLEAR -> Color.WHITE
-            }
-            targetPaint.color = c
-            targetPaint.strokeWidth = dp(if (hazard.level >= SideCollisionLevel.WARNING) 3.5f else 2.3f)
-            markerPaint.color = c
-            canvas.drawRoundRect(rect, dp(8f), dp(8f), targetPaint)
-            val p = mapPoint(hazard.detection.centerX, hazard.detection.bottom)
-            canvas.drawCircle(p.first, p.second, dp(5f), markerPaint)
-
-            val motionText = when (hazard.motionState) {
-                SideMotionState.CUT_IN_IMMINENT -> "ĐANG VÀO LÀN"
-                SideMotionState.CUT_IN_PREDICTED -> "DỰ ĐOÁN LẤN LÀN"
-                SideMotionState.WATCH -> "THEO DÕI LẤN LÀN"
-                SideMotionState.NORMAL -> "XE BÊN"
-            }
-            val tlc = hazard.timeToLaneCrossingSeconds.takeIf { it.isFinite() }
-                ?.let { " • TLC ${String.format("%.1f", it)}s" }.orEmpty()
-            val id = hazard.trackId.takeIf { it > 0 }?.let { " #$it" }.orEmpty()
-            labelPaint.color = c
-            canvas.drawText(
-                "$motionText$id$tlc",
-                rect.left.coerceAtLeast(dp(8f)),
-                (rect.top - dp(7f)).coerceAtLeast(dp(20f)),
-                labelPaint,
-            )
-            labelPaint.color = Color.WHITE
-
-            if (hazard.motionState != SideMotionState.NORMAL) {
-                val y = hazard.detection.bottom.coerceIn(0.42f, 0.98f)
-                val bounds = laneState.takeIf { it.left != null && it.right != null && it.confidence >= 0.25f }
-                    ?.boundsAt(y) ?: TargetSelector.laneBoundsAt(y)
-                val boundaryX = if (hazard.side == LaneSide.LEFT) bounds.first else bounds.second
-                val end = mapPoint(boundaryX, y)
-                val pathPaint = Paint(targetPaint).apply {
-                    strokeWidth = dp(2f)
-                    pathEffect = DashPathEffect(floatArrayOf(dp(7f), dp(5f)), 0f)
-                }
-                canvas.drawLine(p.first, p.second, end.first, end.second, pathPaint)
-                canvas.drawCircle(end.first, end.second, dp(4f), markerPaint)
-            }
-        }
-        targetPaint.strokeWidth = dp(3f)
-    }
-
-    private fun formatDistance(distanceM: Float, quality: RangeQuality?): String {
-        val d = distanceM.coerceAtLeast(0f)
-        return when {
-            quality == RangeQuality.APPROXIMATE -> "~${kotlin.math.round(d).toInt()} m"
-            d >= 20f -> "${kotlin.math.round(d).toInt()} m"
-            quality == RangeQuality.HIGH && d < 12f -> String.format("%.1f m", d)
-            else -> "${kotlin.math.round(d).toInt()} m"
-        }
-    }
-
-    private fun drawLane(canvas: Canvas) {
-        val current = laneState
-        val currentReliable = current.left != null && current.right != null && current.confidence >= 0.18f
-        val held = lastReliableLane?.takeIf {
-            SystemClock.elapsedRealtime() - lastReliableLaneAtMs <= LANE_VISUAL_HOLD_MS
-        }
-        // Keep the last real core/CV lane briefly so dashed markings or one weak frame do not make
-        // the overlay flicker. We never synthesize a fixed lane. Held geometry is visualization-only
-        // and cannot create a lane-departure warning.
-        val state = if (currentReliable) current else held?.copy(
-            departureLevel = LaneDepartureLevel.CENTERED,
-            departureSide = null,
-            confidence = minOf(held.confidence, 0.24f),
-        ) ?: return
-
-        lanePaint.pathEffect = null
-        lanePaint.strokeWidth = dp(if (state.departureLevel == LaneDepartureLevel.WARNING) 4f else 3f)
-        lanePaint.color = when (state.departureLevel) {
-            LaneDepartureLevel.WARNING -> Color.rgb(255, 70, 70)
-            LaneDepartureLevel.CAUTION -> Color.rgb(255, 193, 7)
-            LaneDepartureLevel.CENTERED -> Color.rgb(80, 220, 120)
-            LaneDepartureLevel.UNAVAILABLE -> Color.argb(185, 255, 255, 255)
-        }
-
-        drawCurve(canvas, state.left!!, lanePaint)
-        drawCurve(canvas, state.right!!, lanePaint)
-
-        // Lane-center reference from look-ahead to near field.
-        val centerPaint = Paint(lanePaint).apply {
-            strokeWidth = dp(1.5f)
-            color = Color.argb(170, 0, 230, 255)
-            pathEffect = DashPathEffect(floatArrayOf(dp(8f), dp(7f)), 0f)
-        }
-        val centerPath = Path()
-        var first = true
-        var y = 0.55f
-        while (y <= 0.96f) {
-            val l = state.left.xAt(y)
-            val r = state.right.xAt(y)
-            val p = mapPoint((l + r) * 0.5f, y)
-            if (first) { centerPath.moveTo(p.first, p.second); first = false } else centerPath.lineTo(p.first, p.second)
-            y += 0.025f
-        }
-        canvas.drawPath(centerPath, centerPaint)
-
-        if (state.departureLevel == LaneDepartureLevel.WARNING) {
-            val sideText = if (state.departureSide == LaneSide.LEFT) "LỆCH LÀN TRÁI" else "LỆCH LÀN PHẢI"
-            val p = mapPoint(0.5f, 0.72f)
-            canvas.drawText(sideText, p.first - dp(62f), p.second, labelPaint)
-        }
-    }
-
-    private fun drawCurve(canvas: Canvas, curve: LaneCurve, paint: Paint) {
-        val path = Path()
-        var first = true
-        var y = 0.52f
-        while (y <= 0.98f) {
-            val p = mapPoint(curve.xAt(y), y)
-            if (first) { path.moveTo(p.first, p.second); first = false } else path.lineTo(p.first, p.second)
-            y += 0.018f
-        }
-        canvas.drawPath(path, paint)
-    }
-
     private fun mapRect(d: Detection): RectF {
         val a = mapPoint(d.left, d.top)
         val b = mapPoint(d.right, d.bottom)
@@ -362,7 +532,7 @@ class DetectionOverlayView @JvmOverloads constructor(
     }
 
     private fun mapPoint(x: Float, y: Float): Pair<Float, Float> {
-        // PreviewView FILL_CENTER equivalent transform.
+        // Same FILL_CENTER transform as PreviewView.
         val srcW = sourceAspect
         val srcH = 1f
         val scale = max(width / srcW, height / srcH)
@@ -374,15 +544,17 @@ class DetectionOverlayView @JvmOverloads constructor(
     }
 
     private fun colorForRisk(risk: RiskLevel): Int = when (risk) {
-        RiskLevel.COLLISION, RiskLevel.DANGER -> Color.rgb(255, 70, 70)
-        RiskLevel.WARNING -> Color.rgb(255, 193, 7)
-        RiskLevel.INFO -> Color.rgb(80, 220, 120)
-        RiskLevel.CLEAR -> Color.WHITE
+        RiskLevel.COLLISION, RiskLevel.DANGER -> RED
+        RiskLevel.WARNING -> AMBER
+        RiskLevel.INFO, RiskLevel.CLEAR -> CYAN
     }
 
     private fun dp(v: Float): Float = v * resources.displayMetrics.density
 
     private companion object {
-        const val LANE_VISUAL_HOLD_MS = 1_500L
+        const val LANE_VISUAL_HOLD_MS = 1_350L
+        val CYAN: Int = Color.rgb(0, 226, 210)
+        val AMBER: Int = Color.rgb(255, 194, 45)
+        val RED: Int = Color.rgb(255, 70, 70)
     }
 }

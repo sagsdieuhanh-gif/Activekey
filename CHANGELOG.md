@@ -1,3 +1,20 @@
+# TRUNGKIEN V13.2.0 — P1 STABILITY / CUT-IN / THERMAL
+
+- Stabilize lane geometry across Core/CV handovers.
+- Require temporal persistence before a new object becomes lead.
+- Predict cut-in from the vehicle inner edge relative to the lane marking.
+- Add temporal risk guard against single-frame TTC spikes.
+- Reduce AI cadence automatically while stationary when no urgent event exists.
+
+# TRUNGKIEN V13.0.0 — ADAS LEAD-LANE
+
+- New driver-facing ADAS overlay with cyan lane corridor, center chevrons and floating range tags.
+- Lead selector now uses lane overlap + stronger four-wheel/front priority.
+- Side cut-in tracking extended and screen clutter reduced to meaningful threats.
+- Hood exclusion tightened to reject an accidentally locked bonnet false positive.
+- Lane Core + CV fusion stabilized.
+- License key pair remains compatible with V12 Admin tool.
+
 # CHANGELOG
 
 ## V12.0.0 R2

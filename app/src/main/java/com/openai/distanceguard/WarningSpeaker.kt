@@ -41,7 +41,7 @@ class WarningSpeaker(
 
     // Vehicle-distance milestones requested for forward alerts. Each milestone is spoken once
     // while following the same target, then reset after the target is lost/switched.
-    private val vehicleMilestonesM = intArrayOf(20, 10, 5, 3, 2, 1)
+    private val vehicleMilestonesM = intArrayOf(20, 10, 5, 4, 3, 2, 1)
     private val spokenVehicleMilestones = mutableSetOf<Int>()
     private var lastObservedVehicleDistanceM = Float.NaN
     private var lastVehicleTrackId = -1
@@ -53,6 +53,8 @@ class WarningSpeaker(
     private var lastSpeedLimitSpokenAtMs = 0L
     private var lastTrafficSignKey = ""
     private var lastTrafficSignSpokenAtMs = 0L
+    @Volatile private var suppressUntilElapsedMs = 0L
+    private var lastAnySpeechAtMs = 0L
 
     override fun onInit(status: Int) {
         if (status != TextToSpeech.SUCCESS) {
@@ -142,6 +144,11 @@ class WarningSpeaker(
 
     fun statusText(): String = voiceStatus
 
+    /** Prevent startup/reinitialization chatter until lane/track/range filters have warmed up. */
+    fun suppressFor(durationMs: Long) {
+        suppressUntilElapsedMs = maxOf(suppressUntilElapsedMs, SystemClock.elapsedRealtime() + durationMs.coerceAtLeast(0L))
+    }
+
     fun isVietnameseReady(): Boolean = ready
 
     fun testVietnamese(): Boolean {
@@ -169,6 +176,7 @@ class WarningSpeaker(
             "Chú ý, xe phía trước đang gần.",
             "Cảnh báo, khoảng cách dưới mười mét.",
             "Cảnh báo, còn năm mét.",
+            "Cảnh báo, còn bốn mét.",
             "Quá gần, còn ba mét.",
             "Nguy cơ va chạm!",
             "Nguy hiểm! Phanh ngay!",
@@ -491,6 +499,11 @@ class WarningSpeaker(
         utteranceId: String,
         speechRate: Float = 1.05f,
     ) {
+        val nowSpeech = SystemClock.elapsedRealtime()
+        if (nowSpeech < suppressUntilElapsedMs) return
+        // Never stack informational speech behind another fresh utterance. Urgent QUEUE_FLUSH
+        // warnings may pre-empt; lower-priority QUEUE_ADD messages wait for the speech channel.
+        if (queueMode == TextToSpeech.QUEUE_ADD && nowSpeech - lastAnySpeechAtMs < 1_600L) return
         val engine = tts ?: return
         // Re-check before every utterance. Some engines change voice after an OS language/voice update.
         val activeLanguage = engine.voice?.locale?.language
@@ -501,6 +514,7 @@ class WarningSpeaker(
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
         }
         engine.speak(text, queueMode, params, utteranceId)
+        lastAnySpeechAtMs = nowSpeech
     }
 
     private fun signature(track: TrackState, metrics: DrivingMetrics, risk: RiskLevel): String {
@@ -542,6 +556,7 @@ class WarningSpeaker(
             1 -> "Nguy hiểm! Phanh ngay!"
             2 -> "Nguy cơ va chạm!"
             3 -> "Quá gần, còn ba mét."
+            4 -> "Cảnh báo, còn bốn mét."
             5 -> "Cảnh báo, còn năm mét."
             10 -> "Cảnh báo, khoảng cách dưới mười mét."
             20 -> "Chú ý, xe phía trước đang gần."

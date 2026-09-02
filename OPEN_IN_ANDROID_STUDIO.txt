@@ -1,9 +1,6 @@
-TRUNGKIEN V12.0.0 — FRONT FIRST + LANE HYBRID + HOOD GUARD + THERMAL + KEY
+TRUNGKIEN V13.2.0 FULL ADAS
 
-1) Giải nén project vào đường dẫn ngắn, ví dụ D:\TRUNGKIEN_V12
-2) Android Studio -> Open -> chọn thư mục project vừa giải nén.
-3) Chờ Gradle sync.
-4) Build -> Make Project hoặc chạy :app:assembleDebug.
-5) Task prepareCorePackages tự prepare/verify road_core.dat + lane_core.dat trước preBuild.
-6) Nếu build offline, đọc app/offline_models/README.txt.
-7) Private admin signing key KHÔNG cần cho việc build APK và không được đưa vào APK.
+Mở thư mục gốc project (thư mục chứa settings.gradle.kts) trong Android Studio.
+Project build target: compileSdk/targetSdk 36, JDK 17.
+Model core được task Gradle prepareCorePackages tải/xác minh và đóng vào APK khi build.
+Không đặt private key Admin vào project này.

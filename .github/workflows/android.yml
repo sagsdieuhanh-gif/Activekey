@@ -1,4 +1,4 @@
-name: TRUNGKIEN V12 Android Build
+name: TRUNGKIEN V13.2 FULL Android Build
 
 on:
   workflow_dispatch:
@@ -21,9 +21,9 @@ jobs:
           gradle-version: '9.5.0'
       - name: Install Android SDK packages
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-      - name: Build V12 protected offline-core APK
+      - name: Build V13.2 FULL ADAS protected offline-core APK
         run: gradle --no-daemon clean assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: TRUNGKIEN-V12-debug-apk
+          name: TRUNGKIEN-V13.2-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk

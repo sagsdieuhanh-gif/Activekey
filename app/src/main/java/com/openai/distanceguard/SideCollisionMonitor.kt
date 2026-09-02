@@ -46,6 +46,7 @@ class SideCollisionMonitor(
     private data class Candidate(
         val base: SideCollisionHazard,
         val laneOffset: Float,
+        val edgeGapLane: Float,
         val laneReliable: Boolean,
     )
 
@@ -94,8 +95,8 @@ class SideCollisionMonitor(
     fun reset() = tracks.clear()
 
     private fun buildCandidate(detection: Detection, lane: LaneState?): Candidate? {
-        if (detection.bottom < 0.40f) return null
-        val y = detection.bottom.coerceIn(0.40f, 0.99f)
+        if (detection.bottom < 0.33f) return null
+        val y = detection.bottom.coerceIn(0.33f, 0.99f)
         val laneReliable = lane?.left != null && lane.right != null && lane.confidence >= 0.30f
         val bounds = lane?.takeIf { laneReliable }?.boundsAt(y) ?: TargetSelector.laneBoundsAt(y)
         val laneWidthNorm = (bounds.second - bounds.first).coerceAtLeast(0.08f)
@@ -113,15 +114,18 @@ class SideCollisionMonitor(
 
         val rawForward = estimator.distanceMeters(detection.centerX, detection.bottom) ?: return null
         val forward = correctorProvider().correct(rawForward)
-        if (forward !in 0.7f..32f) return null
+        if (forward !in 0.7f..48f) return null
         val lateral = abs(approximateLateralMeters(detection.centerX, forward))
-        if (lateral > 5.2f && forward > 6f) return null
+        if (lateral > 6.2f && forward > 6f) return null
         val total = hypot(forward.toDouble(), lateral.toDouble()).toFloat()
 
-        val gapLane = when (side) {
-            LaneSide.LEFT -> (-0.5f - laneOffset).coerceAtLeast(0f)
-            LaneSide.RIGHT -> (laneOffset - 0.5f).coerceAtLeast(0f)
+        // Use the vehicle edge nearest our lane rather than its centre. This provides useful
+        // warning before a motorcycle/car centre has already crossed the lane marking.
+        val edgeGapLane = when (side) {
+            LaneSide.LEFT -> ((bounds.first - detection.right) / laneWidthNorm)
+            LaneSide.RIGHT -> ((detection.left - bounds.second) / laneWidthNorm)
         }
+        val gapLane = edgeGapLane.coerceAtLeast(0f)
         val base = SideCollisionHazard(
             side = side,
             detection = detection,
@@ -137,7 +141,7 @@ class SideCollisionMonitor(
             motionState = SideMotionState.NORMAL,
             level = SideCollisionLevel.CLEAR,
         )
-        return Candidate(base, laneOffset, laneReliable)
+        return Candidate(base, laneOffset, edgeGapLane, laneReliable)
     }
 
     private fun updateTrack(
@@ -181,11 +185,9 @@ class SideCollisionMonitor(
         track.lastSeenNs = timestampNs
 
         val inwardMps = (inwardRate * LANE_WIDTH_M).coerceIn(-6f, 6f)
-        val boundaryGapLane = when (base.side) {
-            LaneSide.LEFT -> (-0.5f - candidate.laneOffset).coerceAtLeast(0f)
-            LaneSide.RIGHT -> (candidate.laneOffset - 0.5f).coerceAtLeast(0f)
-        }
-        val boundaryGapM = boundaryGapLane * LANE_WIDTH_M
+        val boundaryGapLane = candidate.edgeGapLane
+        val boundaryGapM = boundaryGapLane.coerceAtLeast(0f) * LANE_WIDTH_M
+        val edgeIntruding = boundaryGapLane <= 0f
         val tlc = if (candidate.laneReliable && inwardMps > 0.18f && boundaryGapM > 0.02f) {
             boundaryGapM / inwardMps
         } else if (candidate.laneReliable && boundaryGapM <= 0.02f && inwardMps > 0.08f) {
@@ -202,10 +204,11 @@ class SideCollisionMonitor(
 
         val evidence = track.inwardEvidence
         val motionState = when {
-            candidate.laneReliable && evidence >= 1 && boundaryGapM <= 0.05f && inwardMps > 0.12f -> SideMotionState.CUT_IN_IMMINENT
-            candidate.laneReliable && evidence >= 2 && tlc.isFinite() && tlc <= 1.25f -> SideMotionState.CUT_IN_IMMINENT
-            candidate.laneReliable && evidence >= 2 && tlc.isFinite() && tlc <= 3.0f -> SideMotionState.CUT_IN_PREDICTED
-            candidate.laneReliable && evidence >= 2 && inwardMps >= 0.22f && boundaryGapM <= 1.6f -> SideMotionState.WATCH
+            candidate.laneReliable && edgeIntruding && evidence >= 1 && inwardMps > 0.08f -> SideMotionState.CUT_IN_IMMINENT
+            candidate.laneReliable && evidence >= 1 && boundaryGapM <= 0.18f && inwardMps > 0.12f -> SideMotionState.CUT_IN_IMMINENT
+            candidate.laneReliable && evidence >= 2 && tlc.isFinite() && tlc <= 1.45f -> SideMotionState.CUT_IN_IMMINENT
+            candidate.laneReliable && evidence >= 2 && tlc.isFinite() && tlc <= 3.6f -> SideMotionState.CUT_IN_PREDICTED
+            candidate.laneReliable && evidence >= 2 && inwardMps >= 0.18f && boundaryGapM <= 2.0f -> SideMotionState.WATCH
             else -> SideMotionState.NORMAL
         }
 
@@ -215,7 +218,7 @@ class SideCollisionMonitor(
             motionState == SideMotionState.CUT_IN_IMMINENT && base.forwardDistanceM <= 14f -> SideCollisionLevel.DANGER
             closing > 0.8f && ttc.isFinite() && ttc <= 1.8f && base.lateralDistanceM <= 3.3f -> SideCollisionLevel.DANGER
             base.forwardDistanceM <= 2.2f && base.lateralDistanceM <= 2.5f -> SideCollisionLevel.DANGER
-            motionState == SideMotionState.CUT_IN_PREDICTED && base.forwardDistanceM <= 26f -> SideCollisionLevel.WARNING
+            motionState == SideMotionState.CUT_IN_PREDICTED && base.forwardDistanceM <= 42f -> SideCollisionLevel.WARNING
             motionState == SideMotionState.CUT_IN_IMMINENT -> SideCollisionLevel.WARNING
             closing > 0.6f && ttc.isFinite() && ttc <= 3.0f && base.lateralDistanceM <= 3.6f -> SideCollisionLevel.WARNING
             base.forwardDistanceM <= 4.5f && base.lateralDistanceM <= 3.0f -> SideCollisionLevel.WARNING

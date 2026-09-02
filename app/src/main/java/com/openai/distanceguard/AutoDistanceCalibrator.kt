@@ -4,7 +4,7 @@ import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * V12 automatic metric-range self calibration.
+ * V13 automatic metric-range self calibration.
  *
  * The geometric camera estimate (visible-object ground contact + calibrated camera model) is never
  * treated as its own reference. A sample is accepted only when a fresh, independent independent lane core

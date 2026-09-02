@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var hoodStore: HoodExclusionStore
     private lateinit var thermalGuard: ThermalGuard
     private lateinit var trafficSignStore: TrafficSignStateStore
+    private lateinit var debugLogger: AdasDebugLogger
     private val laneHybridFusion = LaneHybridFusion()
     private val followingDistanceAdvisor = FollowingDistanceAdvisor()
     private val speedLimitMonitor = SpeedLimitMonitor()
@@ -77,6 +78,7 @@ class MainActivity : ComponentActivity() {
     private var lastUiRenderElapsedMs = 0L
     private var hoodEditStartBoundary = HoodExclusionStore.DEFAULT_BOUNDARY
     private var displayEcoMode = false
+    private var debugMode = false
 
     private val inferenceExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "DistanceGuard-Frame").apply { priority = Thread.NORM_PRIORITY + 1 }
@@ -115,6 +117,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var autoCalibrator: AutoCameraCalibrator
     private val autoDistanceCalibrator = AutoDistanceCalibrator()
     private val tracker = DistanceTracker()
+    private val riskStabilizer = RiskStabilizer()
     private val pedestrianTracker = DistanceTracker()
     private val laneDetector = LaneDetector(320)
     private lateinit var speaker: WarningSpeaker
@@ -227,6 +230,7 @@ class MainActivity : ComponentActivity() {
         hoodStore = HoodExclusionStore(this)
         thermalGuard = ThermalGuard(this) { runOnUiThread { applyDisplayPowerPolicy(); refreshCompactStatus() } }
         trafficSignStore = TrafficSignStateStore(this)
+        debugLogger = AdasDebugLogger(this)
         trafficSignState.set(trafficSignStore.loadState())
         displayEcoMode = getSharedPreferences("display_power_v12", android.content.Context.MODE_PRIVATE).getBoolean("eco_mode", false)
         calibrationStore = CalibrationStore(this)
@@ -292,6 +296,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         accessFeaturesStarted = true
+        speaker.suppressFor(2_800L)
         if (visionEngine == null) loadVisionCore()
         if (laneCoreEngine == null) loadLaneCore()
         requestInitialPermissionsAndStart()
@@ -308,6 +313,7 @@ class MainActivity : ComponentActivity() {
         sideCollisionMonitor.reset()
         laneHybridFusion.reset()
         tracker.reset()
+        riskStabilizer.reset()
         pedestrianTracker.reset()
         followingDistanceAdvisor.reset()
         speedLimitMonitor.reset()
@@ -369,7 +375,7 @@ class MainActivity : ComponentActivity() {
         box.addView(keyInput, LinearLayout.LayoutParams(-1, -2))
 
         val builder = AlertDialog.Builder(this)
-            .setTitle("BẢN QUYỀN / KEY • V12")
+            .setTitle("BẢN QUYỀN / KEY • V13")
             .setView(box)
             .setPositiveButton("KÍCH HOẠT", null)
         if (!blocking) builder.setNegativeButton("ĐÓNG", null)
@@ -448,6 +454,16 @@ class MainActivity : ComponentActivity() {
         summaryStatus = chip("HỆ THỐNG đang chuẩn bị…").apply {
             textSize = if (portrait) 12f else 13f
             setOnClickListener { showSystemStatusDialog() }
+            setOnLongClickListener {
+                debugMode = !debugMode
+                overlay.setDebugStatus(debugMode)
+                Toast.makeText(
+                    this@MainActivity,
+                    if (debugMode) "DEBUG ADAS: BẬT" else "DEBUG ADAS: TẮT",
+                    Toast.LENGTH_SHORT,
+                ).show()
+                true
+            }
         }
         root.addView(summaryStatus, FrameLayout.LayoutParams(-2, dp(38)).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -524,7 +540,7 @@ class MainActivity : ComponentActivity() {
             maxLines = 1
         }
         riskText = TextView(this).apply {
-            text = "THỬ NGHIỆM • KHÔNG THAY THẾ ADAS"
+            text = "HỖ TRỢ LÁI • KHÔNG THAY THẾ NGƯỜI LÁI"
             setTextColor(Color.LTGRAY)
             textSize = 10f
             gravity = Gravity.CENTER
@@ -631,7 +647,7 @@ class MainActivity : ComponentActivity() {
         addAction(if (displayEcoMode) "☀  TẮT MÀN HÌNH TIẾT KIỆM" else "☾  MÀN HÌNH TIẾT KIỆM", if (displayEcoMode) "Trả độ sáng về tự động của hệ thống" else "Giảm độ sáng khi chạy lâu để giảm nhiệt và hao pin") { toggleDisplayEcoMode() }
         addAction(if (trafficSignStore.enabled) "◇  TẮT ĐỌC BIỂN BÁO AI" else "◇  BẬT ĐỌC BIỂN BÁO AI", "R.420 / R.421 / tốc độ tối đa • tắt hoàn toàn khi không dùng") { toggleTrafficSignReader() }
 
-        section("HIỆU CHỈNH", "V12 tự học sai số khoảng cách và cho phép loại phần đầu xe khỏi vùng đo")
+        section("HIỆU CHỈNH", "V13 tự học sai số khoảng cách và cho phép loại phần đầu xe khỏi vùng đo")
         addAction("▰  VÙNG BỎ QUA ĐẦU XE", "Kéo trực tiếp vạch giới hạn trên camera • phần dưới không đo") { startHoodEdit() }
         addAction("↺  RESET VÙNG ĐẦU XE", "Trả vạch về mức khởi tạo rồi có thể kéo chỉnh lại") { resetHoodExclusion() }
         addAction("⌖  HIỆU CHỈNH TÂM LÀN", "Căn tâm xe khi camera đặt lệch trái hoặc phải") { showLaneCalibrationDialog() }
@@ -659,7 +675,7 @@ class MainActivity : ComponentActivity() {
         }
 
         dialog = AlertDialog.Builder(this)
-            .setTitle("TRUNGKIEN V12 • ĐIỀU KHIỂN")
+            .setTitle("TRUNGKIEN V13 • ĐIỀU KHIỂN")
             .setView(scroll)
             .setNegativeButton("ĐÓNG", null)
             .create()
@@ -706,6 +722,7 @@ class MainActivity : ComponentActivity() {
         refreshCorrector(resetTracker = true)
         sideCollisionMonitor.reset()
         targetSelector.reset()
+        riskStabilizer.reset()
         lastRangeTrackId = -1
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
@@ -723,7 +740,9 @@ class MainActivity : ComponentActivity() {
 
     private fun applyDisplayPowerPolicy() {
         val requested = when {
-            thermalGuard.mode == ThermalGuard.Mode.VERY_HOT -> 0.28f
+            thermalGuard.mode == ThermalGuard.Mode.VERY_HOT -> 0.26f
+            thermalGuard.mode == ThermalGuard.Mode.HOT -> 0.40f
+            thermalGuard.mode == ThermalGuard.Mode.BALANCED -> 0.62f
             displayEcoMode -> 0.22f
             else -> WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
         }
@@ -784,9 +803,16 @@ class MainActivity : ComponentActivity() {
                 .append("\n")
             append("GPS: ").append(gpsStatus.text).append("\n")
             append("Vùng bỏ đầu xe: dưới ").append(((1f - hoodStore.boundaryY) * 100f).roundToInt()).append("% khung hình\n")
-            append("Nhiệt máy: ").append(when (thermalGuard.mode) { ThermalGuard.Mode.NORMAL -> "BÌNH THƯỜNG"; ThermalGuard.Mode.HOT -> "NÓNG • giảm tải"; ThermalGuard.Mode.VERY_HOT -> "RẤT NÓNG • ưu tiên an toàn" }).append("\n")
+            append("Nhiệt máy: ").append(when (thermalGuard.mode) {
+                ThermalGuard.Mode.NORMAL -> "BÌNH THƯỜNG"
+                ThermalGuard.Mode.BALANCED -> "ẤM • cân bằng tải"
+                ThermalGuard.Mode.HOT -> "NÓNG • giảm tải"
+                ThermalGuard.Mode.VERY_HOT -> "RẤT NÓNG • ưu tiên an toàn"
+            })
+            thermalGuard.batteryTemperatureC?.let { append(String.format(Locale.US, " • %.1f°C", it)) }
+            append("\n")
             append("Màn hình tiết kiệm: ").append(if (displayEcoMode) "BẬT" else "TẮT").append("\n")
-            val signState = trafficSignState.get()
+            val signState = trafficSignStore.refreshRuntimeRules().also { trafficSignState.set(it) }
             append("Đọc biển báo AI: ").append(if (trafficSignStore.enabled) "BẬT" else "TẮT")
             signState.currentSpeedLimitKmh?.let { append(" • giới hạn ").append(it).append(" km/h") }
             signState.inPopulatedArea?.let { append(if (it) " • trong khu đông dân cư" else " • ngoài khu đông dân cư") }
@@ -795,6 +821,7 @@ class MainActivity : ComponentActivity() {
             append("Bản quyền: ").append(when (access.state) { LicenseGate.AccessState.LICENSED -> "ĐÃ KÍCH HOẠT"; LicenseGate.AccessState.TRIAL -> "DÙNG THỬ ${formatTrial(access.remainingTrialMs)}"; LicenseGate.AccessState.EXPIRED -> "HẾT DÙNG THỬ" }).append("\n")
             append("Mã thiết bị: ").append(access.deviceCode).append("\n")
             append("Giọng cảnh báo: ").append(speaker.statusText()).append("\n")
+            if (debugMode) append("DEBUG log: ").append(debugLogger.path()).append("\n")
             append("Màn hình: ")
             append(if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT) "DỌC" else "NGANG")
             append(" • camera tự xoay theo máy")
@@ -823,7 +850,12 @@ class MainActivity : ComponentActivity() {
             GpsStatus.DISABLED -> "GPS OFF"
             GpsStatus.COARSE_ONLY, GpsStatus.NO_PERMISSION -> "GPS ?"
         }
-        val thermal = when (thermalGuard.mode) { ThermalGuard.Mode.NORMAL -> "T✓"; ThermalGuard.Mode.HOT -> "T!"; ThermalGuard.Mode.VERY_HOT -> "T‼" }
+        val thermal = when (thermalGuard.mode) {
+            ThermalGuard.Mode.NORMAL -> "T✓"
+            ThermalGuard.Mode.BALANCED -> "T~"
+            ThermalGuard.Mode.HOT -> "T!"
+            ThermalGuard.Mode.VERY_HOT -> "T‼"
+        }
         val signs = if (trafficSignStore.enabled) "B✓" else "B—"
         val access = licenseGate.status()
         val license = when (access.state) {
@@ -971,7 +1003,11 @@ class MainActivity : ComponentActivity() {
 
         val started = System.nanoTime()
         val frameTimestamp = image.imageInfo.timestamp.takeIf { it > 0L } ?: started
-        val thermalProfile = thermalGuard.profile(SystemClock.elapsedRealtime() <= urgentVisionUntilElapsedMs)
+        val thermalNow = SystemClock.elapsedRealtime()
+        val thermalProfile = thermalGuard.profile(
+            urgent = thermalNow <= urgentVisionUntilElapsedMs,
+            egoSpeedMps = lastGpsSnapshot.usableSpeedMps(thermalNow),
+        )
         if (lastProtectedFrameNs != 0L && frameTimestamp - lastProtectedFrameNs < thermalProfile.frameIntervalNs) {
             image.close()
             return
@@ -1039,8 +1075,10 @@ class MainActivity : ComponentActivity() {
             val roadUserDetector = visionEngine
             if (roadUserDetector != null && timestamp - lastRoadUserSubmitNs >= thermalProfile.visionIntervalNs && roadUserInferenceBusy.compareAndSet(false, true)) {
                 lastRoadUserSubmitNs = timestamp
-                val longRangeFrontPass = thermalGuard.mode == ThermalGuard.Mode.NORMAL &&
-                    (egoSpeed ?: 0f) >= 16.5f && (++roadUserPassCounter % 3 == 0)
+                val longRangeAllowed = thermalGuard.mode == ThermalGuard.Mode.NORMAL || thermalGuard.mode == ThermalGuard.Mode.BALANCED
+                val longRangeStride = if (thermalGuard.mode == ThermalGuard.Mode.NORMAL) 3 else 4
+                val longRangeFrontPass = longRangeAllowed &&
+                    (egoSpeed ?: 0f) >= 16.5f && (++roadUserPassCounter % longRangeStride == 0)
                 val roadUserInput = roadSensePreprocessor.preprocess(image, longRangeFront = longRangeFrontPass)
                 roadUserExecutor.execute {
                     val detectorStarted = System.nanoTime()
@@ -1108,11 +1146,7 @@ class MainActivity : ComponentActivity() {
             // Optional Vietnamese sign reader. No snapshots/OCR are created while the button is OFF.
             if (trafficSignStore.enabled) {
                 ensureSignSenseEngine()
-                val signIntervalNs = when (thermalGuard.mode) {
-                    ThermalGuard.Mode.NORMAL -> 320_000_000L
-                    ThermalGuard.Mode.HOT -> 520_000_000L
-                    ThermalGuard.Mode.VERY_HOT -> 850_000_000L
-                }
+                val signIntervalNs = thermalProfile.signIntervalNs
                 if (timestamp - lastSignSubmitNs >= signIntervalNs) {
                     val submitted = signSenseEngine?.submit(image, timestamp) == true
                     if (submitted) lastSignSubmitNs = timestamp
@@ -1156,7 +1190,7 @@ class MainActivity : ComponentActivity() {
             if (rawTrackId > 0) lastRangeTrackId = rawTrackId
             val fusedRange = vehicleRangeFusion.update(rawVisionTarget, freshLead, detectionTimestamp)
 
-            // V12 automatic distance self-calibration. Use a fresh independent metric lane-core lead
+            // V13 automatic distance self-calibration. Use a fresh independent metric lane-core lead
             // as the reference for the raw camera geometry only after the same tracked vehicle has
             // remained stable for several observations. No user-entered distance marker is required.
             val learningLead = freshLeadStamp?.takeIf {
@@ -1202,7 +1236,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val metrics = DrivingMetrics.from(track, egoSpeed)
-            val risk = RiskLevel.from(track, metrics)
+            val rawRisk = RiskLevel.from(track, metrics)
+            val risk = riskStabilizer.update(
+                raw = rawRisk,
+                trackId = target?.detection?.trackId ?: -1,
+                nowNs = timestamp,
+            )
             val adviceUncertainty = track?.distanceM?.let { d ->
                 maxOf(rangeUncertaintyM ?: 0f, FollowingDistanceAdvisor.minimumLongRangeUncertainty(d))
             }
@@ -1307,10 +1346,41 @@ class MainActivity : ComponentActivity() {
             frame.pedestrianHazard, frame.pedestrianTrack, frame.pedestrianRangeQuality, frame.pedestrianRisk,
             frame.sideHazards, frame.lane, frame.sourceAspect,
         )
+        if (debugMode) {
+            val confidence = AdasConfidenceEngine.snapshot(frame.lane, frame.target, frame.track, frame.rangeQuality)
+            val targetId = frame.target?.detection?.trackId ?: -1
+            val range = frame.track?.distanceM?.let { String.format(Locale.US, "%.1fm", it) } ?: "—"
+            val ttc = frame.track?.ttcSeconds?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.1fs", it) } ?: "∞"
+            overlay.setDebugStatus(
+                true,
+                listOf(
+                    "V13.2 FULL • FPS ${frame.fps.roundToInt()} • ${thermalGuard.mode}",
+                    "LANE ${confidence.laneLock} ${(frame.lane.confidence * 100f).roundToInt()}% • ${frame.lane.source}",
+                    "LEAD #$targetId • ${confidence.rangeBand ?: "—"} • ${frame.rangeQuality ?: "—"}",
+                    "RANGE $range • TTC $ttc • RISK ${frame.risk}",
+                    "SIDE ${frame.sideHazards.size} • GPS ${frame.gps.speedKmh?.roundToInt() ?: -1}",
+                    "THERM ${thermalGuard.batteryTemperatureC?.let { String.format(Locale.US, "%.1fC", it) } ?: "—"}",
+                ),
+            )
+            debugLogger.log(
+                AdasDebugLogger.DebugFrame(
+                    speedKmh = frame.gps.speedKmh,
+                    leadTrackId = targetId,
+                    distanceM = frame.track?.distanceM,
+                    ttcSeconds = frame.track?.ttcSeconds?.takeIf { it.isFinite() },
+                    laneConfidence = frame.lane.confidence,
+                    risk = frame.risk,
+                    thermal = thermalGuard.mode.name,
+                    sideCount = frame.sideHazards.size,
+                )
+            )
+        } else {
+            overlay.setDebugStatus(false)
+        }
         updateGpsChip(frame.gps)
 
         val speedKmh = frame.metrics.egoSpeedMps?.times(3.6f)
-        val signState = trafficSignState.get()
+        val signState = trafficSignStore.refreshRuntimeRules().also { trafficSignState.set(it) }
         val speedLimitState = speedLimitMonitor.update(speedKmh, signState.currentSpeedLimitKmh, SystemClock.elapsedRealtime())
         speedText.text = speedKmh?.let { speed ->
             signState.currentSpeedLimitKmh?.let { limit -> "GPS ${speed.roundToInt()} • MAX $limit km/h" }
@@ -1382,7 +1452,7 @@ class MainActivity : ComponentActivity() {
                 } else {
                     "Chưa thấy xe ô tô phía trước"
                 }
-                riskText.text = "THỬ NGHIỆM • KHÔNG THAY THẾ ADAS"
+                riskText.text = "HỖ TRỢ LÁI • KHÔNG THAY THẾ NGƯỜI LÁI"
                 riskText.setTextColor(Color.LTGRAY)
             }
             speaker.onNoTarget()
@@ -1460,7 +1530,7 @@ class MainActivity : ComponentActivity() {
             RiskLevel.DANGER -> "KHOẢNG CÁCH BÁM QUÁ GẦN"
             RiskLevel.WARNING -> "CHÚ Ý XE Ô TÔ PHÍA TRƯỚC"
             RiskLevel.INFO -> "XE Ô TÔ PHÍA TRƯỚC"
-            RiskLevel.CLEAR -> "THỬ NGHIỆM • KHÔNG THAY THẾ ADAS"
+            RiskLevel.CLEAR -> "HỖ TRỢ LÁI • KHÔNG THAY THẾ NGƯỜI LÁI"
         }
         if (sideTop != null) {
             val sideName = if (sideTop.side == LaneSide.LEFT) "TRÁI" else "PHẢI"
@@ -1486,7 +1556,7 @@ class MainActivity : ComponentActivity() {
     private fun formatRangeForDisplay(distanceM: Float, quality: RangeQuality?): String {
         val d = distanceM.coerceAtLeast(0f)
         return when {
-            d >= 60f -> "~${d.roundToInt()} m"
+            d >= 60f -> "~${(kotlin.math.round(d / 5f) * 5f).toInt()} m"
             quality == RangeQuality.APPROXIMATE -> "~${d.roundToInt()} m"
             d >= 20f -> "${d.roundToInt()} m"
             quality == RangeQuality.HIGH && d < 12f -> String.format(Locale.US, "%.1f m", d)
@@ -1501,36 +1571,36 @@ class MainActivity : ComponentActivity() {
             LaneSource.CV_FALLBACK -> "CV"
             LaneSource.HYBRID_ESTIMATED -> "ƯỚC LƯỢNG"
         }
+        val debugSuffix = if (debugMode) " • $source • $confidencePct%" else ""
         when (lane.departureLevel) {
             LaneDepartureLevel.WARNING -> {
                 laneText.visibility = View.VISIBLE
                 val side = if (lane.departureSide == LaneSide.LEFT) "TRÁI" else "PHẢI"
-                laneText.text = "⚠ LỆCH LÀN $side • $source • $confidencePct%"
+                laneText.text = "⚠ LỆCH LÀN $side$debugSuffix"
                 laneText.setTextColor(Color.rgb(255, 75, 75))
             }
             LaneDepartureLevel.CAUTION -> {
                 laneText.visibility = View.VISIBLE
                 val side = if (lane.departureSide == LaneSide.LEFT) "TRÁI" else "PHẢI"
-                val speedNote = if (speedKmh != null && speedKmh < 8f) " • voice từ 8 km/h" else ""
                 laneText.text = if (lane.isEstimated || lane.source == LaneSource.HYBRID_ESTIMATED) {
-                    "LÀN ƯỚC LƯỢNG • $confidencePct%$speedNote"
+                    "LÀN ĐANG ƯỚC LƯỢNG$debugSuffix"
                 } else {
-                    "LÀN: sát vạch $side • $source • $confidencePct%$speedNote"
+                    "CHÚ Ý • SÁT VẠCH $side$debugSuffix"
                 }
                 laneText.setTextColor(Color.rgb(255, 193, 7))
             }
             LaneDepartureLevel.CENTERED -> {
                 laneText.visibility = View.VISIBLE
                 laneText.text = if (lane.isEstimated || lane.source == LaneSource.HYBRID_ESTIMATED) {
-                    "LÀN ƯỚC LƯỢNG • $confidencePct%"
+                    "LÀN ĐANG ƯỚC LƯỢNG$debugSuffix"
                 } else {
-                    "LÀN OK • $source • $confidencePct%"
+                    "LÀN ỔN ĐỊNH$debugSuffix"
                 }
                 laneText.setTextColor(if (lane.isEstimated) Color.rgb(255, 193, 7) else Color.rgb(90, 225, 125))
             }
             LaneDepartureLevel.UNAVAILABLE -> {
                 laneText.visibility = View.VISIBLE
-                laneText.text = "LÀN: CHƯA NHẬN DIỆN"
+                laneText.text = "LÀN: ĐANG TÌM"
                 laneText.setTextColor(Color.LTGRAY)
             }
         }
@@ -1562,7 +1632,7 @@ class MainActivity : ComponentActivity() {
         val target = latestTargetForCalibration.get()
         val currentConfidence = target?.correctionConfidence?.times(100f)?.roundToInt()
         val message = buildString {
-            append("V12 tự hiệu chỉnh khoảng cách hoàn toàn tự động; không cần nhập khoảng cách thật bằng tay.\n\n")
+            append("V13 tự hiệu chỉnh khoảng cách hoàn toàn tự động; không cần nhập khoảng cách thật bằng tay.\n\n")
             append("Hệ thống chỉ học khi ROAD CORE/camera và LANE CORE cùng bám một xe phía trước, Track ID ổn định, đủ hai vạch làn và confidence cao trong nhiều frame liên tiếp.\n\n")
             append("Mẫu tự học đã lưu: ${stats.sampleCount}\n")
             append("Hệ số bù trung bình: ${String.format(Locale.US, "%.3f×", stats.meanRatio)}")
@@ -1571,7 +1641,7 @@ class MainActivity : ComponentActivity() {
         }
 
         AlertDialog.Builder(this)
-            .setTitle("Tự hiệu chỉnh khoảng cách • V12")
+            .setTitle("Tự hiệu chỉnh khoảng cách • V13")
             .setMessage(message)
             .setNegativeButton("ĐÓNG", null)
             .setNeutralButton("XÓA DỮ LIỆU TỰ HỌC") { _, _ -> confirmClearCorrectionSamples() }
@@ -1581,13 +1651,13 @@ class MainActivity : ComponentActivity() {
     private fun confirmClearCorrectionSamples() {
         AlertDialog.Builder(this)
             .setTitle("Xóa dữ liệu học sai số?")
-            .setMessage("Xóa các mẫu V12 đã tự học. Thông số chiều cao/góc/FOV vẫn được giữ và hệ thống sẽ tự học lại khi có dữ liệu đủ tin cậy.")
+            .setMessage("Xóa các mẫu V13 đã tự học. Thông số chiều cao/góc/FOV vẫn được giữ và hệ thống sẽ tự học lại khi có dữ liệu đủ tin cậy.")
             .setNegativeButton("HỦY", null)
             .setPositiveButton("XÓA") { _, _ ->
                 correctionStore.clear()
                 refreshCorrector(resetTracker = true)
                 autoDistanceCalibrator.reset()
-                Toast.makeText(this, "Đã xóa dữ liệu tự học; V12 sẽ tự hiệu chỉnh lại.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Đã xóa dữ liệu tự học; V13 sẽ tự hiệu chỉnh lại.", Toast.LENGTH_SHORT).show()
             }
             .show()
     }

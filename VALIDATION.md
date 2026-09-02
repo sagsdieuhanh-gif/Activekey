@@ -1,24 +1,35 @@
-# VALIDATION — V12.0.0 R2
+# VALIDATION — TRUNGKIEN V13.2.0 FULL
 
-Đã kiểm tra trong môi trường đóng gói:
+## Static validation trong môi trường đóng gói
+- Pure Kotlin ADAS core compile: PASS
+- Pure smoke test: PASS (lead-first car vs side motorcycle, mature Track ID coast/reacquire, 90 m uncertainty floor, side cut-in trend promotion)
+  - Models / Calibration / DistanceCorrection
+  - FollowingDistanceAdvisor
+  - GroundPlaneDistanceEstimator / TargetSelector
+  - LaneDetector / LaneHybridFusion
+  - RangeFusion / DistanceTracker
+  - SideCollisionMonitor
+  - RoadUserTemporalFilter V13.2
+  - RiskStabilizer / AdasConfidence
+- Android-dependent edited files: syntax parse check, không có `expecting`, `unclosed`, `unexpected tokens`, `missing }`: PASS.
+- Source scan: không có PEM/private key: PASS.
+- Workflow: Android API 36 + JDK 17 + Gradle 9.5.0: configured.
+- Version: 13.2.0 / code 1320.
 
-- FollowingDistanceAdvisor pure Kotlin compile + smoke test: PASS.
-  - 60 km/h -> 35 m; 70 -> 55 m; 90 -> 70 m; 110 -> 100 m.
-  - 112 m ở 110 km/h với biên sai số bảo thủ -> chỉ chuyển SAFE sau cửa sổ ổn định.
-  - 105 m ± 8 m ở 110 km/h -> không bị xác nhận SAFE vì cận dưới chưa đạt 100 m.
-- RangeFusion / TargetSelector pure core compile: PASS.
-- FRONT FIRST smoke simulation: car trung tâm được ưu tiên hơn motorcycle nhỏ/lệch bên: PASS.
-- LONG RANGE ROI mapping: central crop được ánh xạ lại về tọa độ toàn khung: static/targeted compile PASS.
-- SignSenseEngine + TrafficSignState syntax compile với Android/ML Kit stubs: PASS.
-- Road Core preprocessor/engine syntax compile với ImageProxy/runtime stubs: PASS.
-- WarningSpeaker syntax compile với Android/domain stubs: PASS.
-- LANE HYBRID / Hood Guard / Thermal Guard / LicenseGate validations từ V12 nền được giữ: PASS.
-- Overlay: không còn vẽ nhãn/đường `CHÂN TRỜI AUTO`; hình học road-plane nội bộ vẫn được giữ cho phép đo/lane.
-- Nút `BIỂN BÁO AI` OFF đóng Sign Core/OCR; ON mới cho phép xử lý P.127, R.420, R.421 với multi-frame confirmation.
-- Search `app/src/main` + `app/build.gradle.kts`: không còn tên model upstream trong UI/log/runtime asset identifiers. Attribution bắt buộc vẫn nằm trong `THIRD_PARTY_NOTICES.md`.
-- Public source package không chứa private admin signing key.
-- V12 version: `versionCode=1201`, `versionName=12.0.0`.
+## Behaviour encoded in V13.2
+- Long-range >=60 m cần lead confirmation mạnh hơn và uncertainty floor bảo thủ.
+- >=85 m không được quảng bá HIGH range quality.
+- Lead handover có hysteresis; motorcycle/bicycle lane bên bị penalty mạnh.
+- Tracker coasts/reacquires mature Track ID qua occlusion ngắn.
+- Lane confidence thấp/estimated được render yếu/nét đứt.
+- Cut-in TLC dùng mép vehicle gần lane.
+- Collision risk immediate; lower risk temporal-confirmed.
+- TTS startup warm-up + queue guard + milestone 5/4/3/2/1 m.
+- Thermal 4 mode + battery temperature + stationary low-power.
+- Sign runtime persistence có TTL.
+- Debug logging không chứa camera frame.
 
-Chưa chạy full `assembleDebug` trong container này do không có Android SDK/Gradle distribution cache phù hợp. Dự án được giữ theo cấu trúc Android Studio build-ready; máy Windows/Android Studio của người dùng là nơi xác nhận cuối cùng toàn bộ Android resources/runtime dependencies.
+## Cần xác nhận trên xe/thực địa
+Không có test bench camera/radar chuẩn trong container. Trước khi coi khoảng cách là đã hiệu chỉnh thực tế, phải test các mốc 5 / 10 / 20 / 30 / 50 / 70 / 100 m với mốc đo độc lập, nhiều loại xe, đường thẳng/cong, ngày/đêm. Long-range 60–100 m phải được xem là approximate.
 
-Các cảnh báo native `Unable to strip ...so` (nếu xuất hiện) là packaging warnings của native runtime, không tự động đồng nghĩa build fail.
+Full `assembleDebug` được xác nhận cuối trên GitHub Actions sau khi upload source, vì model AI được tải/bundle trong workflow build.

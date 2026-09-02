@@ -108,10 +108,11 @@ class RoadSensePreprocessor(
             }
         }
 
-        // detector inference runs on a separate executor. Return an immutable snapshot instead of the
-        // reused scratch tensor; otherwise the next camera frame can overwrite an in-flight input.
+        // MainActivity holds roadUserInferenceBusy from preprocessing through detector completion,
+        // so this large ~4.9 MB tensor cannot be overwritten by a second Road Core pass. Reusing it
+        // avoids a large FloatArray allocation/GC cycle every inference and materially reduces heat.
         return RoadSenseFrame(
-            tensorNchwBgr = reusableInput.copyOf(),
+            tensorNchwBgr = reusableInput,
             resizeRatio = ratio,
             displayWidth = displayW,
             displayHeight = displayH,
