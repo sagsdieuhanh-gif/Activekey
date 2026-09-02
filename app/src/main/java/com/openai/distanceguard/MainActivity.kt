@@ -456,7 +456,7 @@ class MainActivity : ComponentActivity() {
             setOnClickListener { showSystemStatusDialog() }
             setOnLongClickListener {
                 debugMode = !debugMode
-                overlay.setDebugStatus(debugMode)
+                this@MainActivity.overlay.setDebugStatus(debugMode)
                 Toast.makeText(
                     this@MainActivity,
                     if (debugMode) "DEBUG ADAS: BẬT" else "DEBUG ADAS: TẮT",
