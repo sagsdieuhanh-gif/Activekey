@@ -12,12 +12,12 @@ val generatedCoreAssets = layout.projectDirectory.dir("src/main/assets")
 
 android {
     namespace = "com.openai.distanceguard"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.trungkien.distanceguard.v1tracking"
         minSdk = 24
-        targetSdk = 37
+        targetSdk = 36
         // V12 refreshed: long-range front detection, legal-gap advisor, optional sign reader, hood guard, thermal guard and licensed access.
         versionCode = 1201
         versionName = "12.0.0"

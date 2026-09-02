@@ -20,7 +20,7 @@ jobs:
         with:
           gradle-version: '9.5.0'
       - name: Install Android SDK packages
-        run: sdkmanager "platform-tools" "platforms;android-37" "build-tools;36.0.0"
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
       - name: Build V12 protected offline-core APK
         run: gradle --no-daemon clean assembleDebug
       - uses: actions/upload-artifact@v4
