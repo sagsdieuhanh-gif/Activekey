@@ -1,4 +1,4 @@
-name: TRUNGKIEN V15 Dedicated Lane Android Build
+name: TRUNGKIEN V15.1 Dedicated Lane Android Build
 
 on:
   workflow_dispatch:
@@ -20,7 +20,7 @@ jobs:
           gradle-version: '9.5.0'
       - name: Install Android SDK packages
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-      - name: Stage V15 dedicated UFLD CULane model
+      - name: Stage V15.1 dedicated UFLD CULane model
         shell: bash
         run: |
           set -euo pipefail
@@ -34,9 +34,9 @@ jobs:
           test -n "$MODEL"
           cp "$MODEL" app/offline_models/lane_core.dat
           echo "Dedicated lane model: $MODEL ($(du -h app/offline_models/lane_core.dat | cut -f1))"
-      - name: Build V15 dedicated-lane front-distance-only APK
+      - name: Build V15.1 focused lane front-distance move-off APK
         run: gradle --no-daemon clean assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: TRUNGKIEN-V15-debug-apk
+          name: TRUNGKIEN-V15.1-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
