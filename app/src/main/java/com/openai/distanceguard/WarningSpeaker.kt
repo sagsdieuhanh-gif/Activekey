@@ -41,7 +41,7 @@ class WarningSpeaker(
 
     // Vehicle-distance milestones requested for forward alerts. Each milestone is spoken once
     // while following the same target, then reset after the target is lost/switched.
-    private val vehicleMilestonesM = intArrayOf(20, 10, 5, 4, 3, 2, 1)
+    private val vehicleMilestonesM = intArrayOf(50, 30, 20, 10, 5, 4, 3, 2, 1)
     private val spokenVehicleMilestones = mutableSetOf<Int>()
     private var lastObservedVehicleDistanceM = Float.NaN
     private var lastVehicleTrackId = -1
@@ -210,100 +210,20 @@ class WarningSpeaker(
     fun onTarget(track: TrackState, metrics: DrivingMetrics, risk: RiskLevel, targetTrackId: Int = -1) {
         noTargetSinceMs = 0L
         val now = SystemClock.elapsedRealtime()
-        if (targetTrackId > 0 && lastVehicleTrackId > 0 && targetTrackId != lastVehicleTrackId) {
-            resetVehicleMilestones()
-            lastRisk = RiskLevel.CLEAR
-            lastSignature = ""
-        }
+        if (targetTrackId > 0 && lastVehicleTrackId > 0 && targetTrackId != lastVehicleTrackId) resetVehicleMilestones()
         if (targetTrackId > 0) lastVehicleTrackId = targetTrackId
-
-        // A large sudden move to a farther object usually means target selection switched vehicles.
         if (lastObservedVehicleDistanceM.isFinite()) {
             val jump = track.distanceM - lastObservedVehicleDistanceM
-            val switchThreshold = kotlin.math.max(12f, lastObservedVehicleDistanceM * 0.45f)
-            if (jump > switchThreshold) {
-                resetVehicleMilestones()
-            }
+            if (jump > kotlin.math.max(12f, lastObservedVehicleDistanceM * 0.45f)) resetVehicleMilestones()
         }
-
-        val crossedMilestone = crossedVehicleMilestone(lastObservedVehicleDistanceM, track.distanceM)
+        val milestone = crossedVehicleMilestone(lastObservedVehicleDistanceM, track.distanceM)
         lastObservedVehicleDistanceM = track.distanceM
-
-        if (muted || !ready) {
-            lastRisk = risk
-            return
-        }
-
-        val escalated = risk.ordinal > lastRisk.ordinal
-        val cooldown = when (risk) {
-            RiskLevel.COLLISION -> 1_700L
-            RiskLevel.DANGER -> 2_500L
-            RiskLevel.WARNING -> 4_000L
-            RiskLevel.INFO -> 7_000L
-            RiskLevel.CLEAR -> Long.MAX_VALUE
-        }
-
-        // V10 priority: 1 m emergency > TTC collision > requested distance milestones > lower risk chatter.
-        // This lets a fast-closing vehicle trigger collision speech even when it is still 8-15 m away.
-        val urgentRisk = risk >= RiskLevel.DANGER
-        val signature = signature(track, metrics, risk)
-        val riskChanged = signature != lastSignature
-        val mayRepeatRisk = risk != RiskLevel.CLEAR && now - lastSpokenAtMs >= cooldown && riskChanged
-
-        val emergencyOneMeter = crossedMilestone == 1
-        val milestoneCooldown = when {
-            crossedMilestone != null && crossedMilestone <= 3 -> 350L
-            crossedMilestone != null && crossedMilestone <= 10 -> 550L
-            else -> 1_250L
-        }
-
-        if (emergencyOneMeter && now - lastSpokenAtMs >= 300L) {
-            speakVietnamese(
-                milestoneMessage(1),
-                TextToSpeech.QUEUE_FLUSH,
-                "distance_emergency_1m_${now}",
-                1.18f,
-            )
-            lastSpokenAtMs = now
-            lastSignature = "MILESTONE:1"
-        } else if (risk == RiskLevel.COLLISION && (escalated || mayRepeatRisk)) {
-            speakVietnamese(
-                "Nguy cơ va chạm! Giảm tốc ngay!",
-                TextToSpeech.QUEUE_FLUSH,
-                "distance_collision_${now}",
-                1.18f,
-            )
-            lastSpokenAtMs = now
-            lastSignature = signature
-        } else if (crossedMilestone != null && now - lastSpokenAtMs >= milestoneCooldown && (crossedMilestone <= 5 || !urgentRisk)) {
-            speakVietnamese(
-                milestoneMessage(crossedMilestone),
-                TextToSpeech.QUEUE_FLUSH,
-                "distance_milestone_${crossedMilestone}_${now}",
-                when { crossedMilestone <= 5 -> 1.16f; crossedMilestone <= 10 -> 1.11f; else -> 1.07f },
-            )
-            lastSpokenAtMs = now
-            lastSignature = "MILESTONE:$crossedMilestone"
-        } else if (urgentRisk && (escalated || mayRepeatRisk)) {
-            speakVietnamese(
-                message(track, metrics, risk),
-                TextToSpeech.QUEUE_FLUSH,
-                "distance_guard_${now}",
-                1.12f,
-            )
-            lastSpokenAtMs = now
-            lastSignature = signature
-        } else if (!urgentRisk && (escalated || mayRepeatRisk) && risk >= RiskLevel.WARNING) {
-            speakVietnamese(
-                message(track, metrics, risk),
-                TextToSpeech.QUEUE_ADD,
-                "distance_guard_${now}",
-                1.05f,
-            )
-            lastSpokenAtMs = now
-            lastSignature = signature
-        }
-        lastRisk = risk
+        if (muted || !ready || milestone == null) return
+        val cooldown = when { milestone <= 3 -> 350L; milestone <= 10 -> 550L; else -> 1_200L }
+        if (now - lastSpokenAtMs < cooldown) return
+        speakVietnamese(milestoneMessage(milestone), TextToSpeech.QUEUE_FLUSH, "front_distance_${milestone}_${now}", if (milestone <= 5) 1.14f else 1.07f)
+        lastSpokenAtMs = now
+        lastSignature = "FRONT_DISTANCE:$milestone"
     }
 
     fun onNoTarget() {
@@ -319,178 +239,31 @@ class WarningSpeaker(
 
     /** Pedestrian warning has priority over ordinary following-distance and lane warnings. */
     fun onPedestrian(hazard: PedestrianHazard?, track: TrackState?, risk: PedestrianRiskLevel) {
-        if (hazard == null || track == null || risk == PedestrianRiskLevel.CLEAR) {
-            lastPedestrianRisk = PedestrianRiskLevel.CLEAR
-            lastPedestrianSignature = ""
-            return
-        }
-        if (muted || !ready) return
-
-        val now = SystemClock.elapsedRealtime()
-        val distanceBucket = when (risk) {
-            PedestrianRiskLevel.DANGER -> track.distanceM.roundToInt().coerceAtLeast(1)
-            PedestrianRiskLevel.WARNING -> ((track.distanceM / 2f).roundToInt() * 2).coerceAtLeast(1)
-            PedestrianRiskLevel.INFO -> ((track.distanceM / 5f).roundToInt() * 5).coerceAtLeast(1)
-            PedestrianRiskLevel.CLEAR -> -1
-        }
-        val signature = "${risk.name}:$distanceBucket:${hazard.inVehiclePath}"
-        val escalated = risk.ordinal > lastPedestrianRisk.ordinal
-        val cooldown = when (risk) {
-            PedestrianRiskLevel.DANGER -> 2_200L
-            PedestrianRiskLevel.WARNING -> 4_500L
-            PedestrianRiskLevel.INFO -> 9_000L
-            PedestrianRiskLevel.CLEAR -> Long.MAX_VALUE
-        }
-        if (!escalated && (signature == lastPedestrianSignature || now - lastPedestrianSpokenAtMs < cooldown)) {
-            lastPedestrianRisk = risk
-            return
-        }
-
-        val d = track.distanceM.roundToInt().coerceAtLeast(1)
-        val dText = vietnameseNumber(d)
-        val text = when (risk) {
-            PedestrianRiskLevel.DANGER -> "Nguy hiểm, có người phía trước. Còn $dText mét."
-            PedestrianRiskLevel.WARNING -> if (hazard.inVehiclePath) {
-                "Chú ý, có người trong hướng di chuyển. Khoảng cách $dText mét."
-            } else {
-                "Chú ý, có người sát hướng di chuyển. Khoảng cách $dText mét."
-            }
-            PedestrianRiskLevel.INFO -> "Chú ý, có người phía trước. Khoảng cách $dText mét."
-            PedestrianRiskLevel.CLEAR -> ""
-        }
-        val queueMode = if (risk >= PedestrianRiskLevel.WARNING) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-        speakVietnamese(text, queueMode, "pedestrian_guard_$now", if (risk >= PedestrianRiskLevel.WARNING) 1.10f else 1.05f)
-        lastPedestrianSpokenAtMs = now
-        lastPedestrianSignature = signature
-        lastPedestrianRisk = risk
+        return
     }
 
     /** Side-collision + predicted cut-in warning for vehicles visible beside the ego corridor. */
     fun onSideHazards(hazards: List<SideCollisionHazard>) {
-        if (muted || !ready || hazards.isEmpty()) return
-        val now = SystemClock.elapsedRealtime()
-
-        // A fresh forward collision or pedestrian warning keeps priority over side chatter.
-        if (lastRisk >= RiskLevel.DANGER && now - lastSpokenAtMs < 2_800L) return
-        if (lastPedestrianRisk >= PedestrianRiskLevel.WARNING && now - lastPedestrianSpokenAtMs < 3_500L) return
-
-        val hazard = hazards.maxWithOrNull(
-            compareBy<SideCollisionHazard> { it.level.ordinal }
-                .thenBy { if (it.motionState == SideMotionState.CUT_IN_IMMINENT) 2 else if (it.motionState == SideMotionState.CUT_IN_PREDICTED) 1 else 0 }
-                .thenBy { -it.distanceM }
-        ) ?: return
-        if (hazard.level < SideCollisionLevel.WARNING) return
-
-        val sideText = if (hazard.side == LaneSide.LEFT) "bên trái" else "bên phải"
-        val tlcBucket = hazard.timeToLaneCrossingSeconds.takeIf { it.isFinite() }?.let { (it * 2f).roundToInt() } ?: -1
-        val signature = "${hazard.trackId}:${hazard.side}:${hazard.level}:${hazard.motionState}:$tlcBucket"
-        val cooldown = when {
-            hazard.motionState == SideMotionState.CUT_IN_IMMINENT -> 1_500L
-            hazard.level == SideCollisionLevel.DANGER -> 1_800L
-            else -> 3_200L
-        }
-        if (signature == lastSideSignature && now - lastSideSpokenAtMs < cooldown) return
-
-        val text = when {
-            hazard.motionState == SideMotionState.CUT_IN_IMMINENT -> "Cảnh báo, xe $sideText đang vào làn."
-            hazard.motionState == SideMotionState.CUT_IN_PREDICTED -> "Chú ý, xe $sideText có xu hướng lấn làn."
-            hazard.level == SideCollisionLevel.DANGER -> "Nguy cơ va chạm $sideText."
-            else -> "Cảnh báo, xe $sideText đang ở rất gần."
-        }
-        speakVietnamese(text, TextToSpeech.QUEUE_FLUSH, "side_guard_${now}", 1.12f)
-        lastSideSpokenAtMs = now
-        lastSideSignature = signature
+        return
     }
 
     /** Lane-departure TTS is intentionally lower priority than collision/distance danger. */
     fun onLane(lane: LaneState, egoSpeedMps: Float?) {
-        if (muted || !ready) return
-        val now = SystemClock.elapsedRealtime()
-        if (lane.departureLevel != LaneDepartureLevel.WARNING || lane.departureSide == null) return
-        // Require a real moving speed so GPS jitter while parked cannot trigger LDW.
-        if (egoSpeedMps == null || egoSpeedMps < 2.2f) return // ~8 km/h
-        // Never interrupt a fresh high-priority forward hazard message.
-        if (lastRisk >= RiskLevel.DANGER && now - lastSpokenAtMs < 3_800L) return
-        if (lastPedestrianRisk >= PedestrianRiskLevel.WARNING && now - lastPedestrianSpokenAtMs < 4_500L) return
-
-        val sideChanged = lane.departureSide != lastLaneSide
-        val cooldownExpired = now - lastLaneSpokenAtMs >= 5_000L
-        if (!sideChanged && !cooldownExpired) return
-
-        val text = if (lane.departureSide == LaneSide.LEFT) {
-            "Xe đang lệch trái."
-        } else {
-            "Xe đang lệch phải."
-        }
-        // Flush ordinary queued speech so the directional lane warning is heard immediately.
-        speakVietnamese(text, TextToSpeech.QUEUE_FLUSH, "lane_guard_${now}", 1.10f)
-        lastLaneSpokenAtMs = now
-        lastLaneSide = lane.departureSide
+        return
     }
 
     /** Lower-priority legal following-distance guidance. Collision/cut-in/pedestrian speech wins. */
     fun onFollowingDistance(advice: FollowingDistanceAdvice) {
-        val now = SystemClock.elapsedRealtime()
-        val status = advice.status
-        if (status == lastFollowingStatus) return
-        lastFollowingStatus = status
-        if (muted || !ready) return
-        if (lastRisk >= RiskLevel.WARNING && now - lastSpokenAtMs < 4_500L) return
-        if (lastPedestrianRisk >= PedestrianRiskLevel.WARNING && now - lastPedestrianSpokenAtMs < 4_500L) return
-        if (now - lastSideSpokenAtMs < 3_500L) return
-        if (now - lastFollowingSpokenAtMs < 4_000L) return
-
-        val text = when (status) {
-            FollowingDistanceStatus.SAFE -> "Bạn đã giữ đủ khoảng cách an toàn."
-            FollowingDistanceStatus.TOO_CLOSE -> advice.requiredM?.roundToInt()?.let {
-                "Khoảng cách chưa an toàn, cần tối thiểu ${vietnameseNumber(it)} mét."
-            }
-            else -> null
-        } ?: return
-        speakVietnamese(text, TextToSpeech.QUEUE_ADD, "following_${now}", 1.04f)
-        lastFollowingSpokenAtMs = now
+        return
     }
 
     /** Road-sign TTS is informational and never interrupts a recent collision warning. */
     fun onTrafficSign(observation: TrafficSignObservation) {
-        if (muted || !ready) return
-        val now = SystemClock.elapsedRealtime()
-        if (lastRisk >= RiskLevel.WARNING && now - lastSpokenAtMs < 5_000L) return
-        if (lastPedestrianRisk >= PedestrianRiskLevel.WARNING && now - lastPedestrianSpokenAtMs < 5_000L) return
-        if (now - lastSideSpokenAtMs < 4_000L) return
-        val key = when (observation.kind) {
-            TrafficSignKind.SPEED_LIMIT -> "SPEED:${observation.speedLimitKmh}"
-            TrafficSignKind.POPULATED_AREA_START -> "POP:START"
-            TrafficSignKind.POPULATED_AREA_END -> "POP:END"
-        }
-        if (key == lastTrafficSignKey && now - lastTrafficSignSpokenAtMs < 18_000L) return
-        val text = when (observation.kind) {
-            TrafficSignKind.SPEED_LIMIT -> observation.speedLimitKmh?.let {
-                "Tốc độ tối đa ${vietnameseNumber(it)} ki-lô-mét một giờ."
-            }
-            TrafficSignKind.POPULATED_AREA_START -> "Bắt đầu khu đông dân cư."
-            TrafficSignKind.POPULATED_AREA_END -> "Hết khu đông dân cư."
-        } ?: return
-        speakVietnamese(text, TextToSpeech.QUEUE_ADD, "traffic_sign_${now}", 1.02f)
-        lastTrafficSignKey = key
-        lastTrafficSignSpokenAtMs = now
+        return
     }
 
     fun onSpeedLimitState(state: SpeedLimitMonitor.State, limitKmh: Int?) {
-        val now = SystemClock.elapsedRealtime()
-        if (state == lastSpeedLimitState) return
-        val previous = lastSpeedLimitState
-        lastSpeedLimitState = state
-        if (muted || !ready || limitKmh == null) return
-        if (lastRisk >= RiskLevel.WARNING && now - lastSpokenAtMs < 5_000L) return
-        if (now - lastSpeedLimitSpokenAtMs < 4_000L) return
-        val text = when {
-            state == SpeedLimitMonitor.State.OVER -> "Bạn đang vượt tốc độ cho phép."
-            state == SpeedLimitMonitor.State.OK && previous == SpeedLimitMonitor.State.OVER -> "Tốc độ đã phù hợp."
-            else -> null
-        } ?: return
-        speakVietnamese(text, TextToSpeech.QUEUE_ADD, "speed_limit_${now}", 1.04f)
-        lastSpeedLimitSpokenAtMs = now
+        return
     }
 
     private fun speakVietnamese(
@@ -552,16 +325,7 @@ class WarningSpeaker(
 
     private fun milestoneMessage(milestoneM: Int): String {
         val distanceText = vietnameseNumber(milestoneM)
-        return when (milestoneM) {
-            1 -> "Nguy hiểm! Phanh ngay!"
-            2 -> "Nguy cơ va chạm!"
-            3 -> "Quá gần, còn ba mét."
-            4 -> "Cảnh báo, còn bốn mét."
-            5 -> "Cảnh báo, còn năm mét."
-            10 -> "Cảnh báo, khoảng cách dưới mười mét."
-            20 -> "Chú ý, xe phía trước đang gần."
-            else -> "Xe phía trước, còn $distanceText mét."
-        }
+        return "Xe phía trước, $distanceText mét."
     }
 
     /**

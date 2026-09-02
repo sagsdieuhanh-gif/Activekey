@@ -1,4 +1,4 @@
-# HƯỚNG DẪN SỬ DỤNG — TRUNGKIEN V14.1.0 NIGHT/CENTER ADAS
+# HƯỚNG DẪN SỬ DỤNG — TRUNGKIEN V15.0 NIGHT/CENTER ADAS
 
 ## 1. Gắn điện thoại
 - Cố định điện thoại chắc chắn, camera sau nhìn thẳng theo hướng xe.
@@ -9,13 +9,13 @@
 Vào **CÀI ĐẶT → VÙNG BỎ QUA ĐẦU XE**. Kéo vạch ngang tới ngay phía trên phần capo/đầu xe xuất hiện trong camera rồi bấm **LƯU VÙNG**. Phần dưới vạch không được dùng làm mục tiêu đo.
 
 ## 3. NIGHT AUTO
-V14.1 tự nhận biết cảnh thiếu sáng/ban đêm, không cần nút bật riêng.
+V15 tự nhận biết cảnh thiếu sáng/ban đêm, không cần nút bật riêng.
 - Hệ thống dùng cả độ sáng trung bình và tỷ lệ vùng tối, vì đèn đường/đèn pha có thể làm trung bình ảnh sáng giả.
 - Khi NIGHT AUTO hoạt động, Road Core được nâng vùng tối có kiểm soát.
 - Giao diện trạng thái lane có thể hiện `NIGHT` hoặc `NIGHT CENTER` khi đang dùng cơ chế dự phòng ban đêm.
 
 ## 4. Lane NEAR-FIRST ban đêm
-V14.1 vẫn ưu tiên vạch gần xe nhưng thêm xử lý riêng cho thiếu sáng:
+V15 vẫn ưu tiên vạch gần xe nhưng thêm xử lý riêng cho thiếu sáng:
 - quét dày hơn vùng khoảng 50–96% chiều cao ảnh;
 - ưu tiên **độ tương phản cục bộ của vạch phản sáng so với mặt đường**, không bắt vạch phải trắng sáng tuyệt đối;
 - cho phép khóa một bên vạch ở confidence thấp hơn rồi suy ra biên còn lại ở mức **ƯỚC LƯỢNG**;
@@ -23,7 +23,7 @@ V14.1 vẫn ưu tiên vạch gần xe nhưng thêm xử lý riêng cho thiếu s
 - khi Lane Core và vạch phản sáng gần xe bất đồng, vạch gần xe có thể được quyền ưu tiên.
 
 ## 5. CENTER FALLBACK khi lane chưa khóa
-Đây là thay đổi quan trọng của V14.1:
+Đây là thay đổi quan trọng của V15:
 - **mất lane không còn đồng nghĩa mất luôn xe phía trước**;
 - khi lane yếu/đang tìm, app định kỳ chạy một crop tập trung vào vùng chính giữa phía trước;
 - xe ô tô/bus/truck ổn định trong phễu giữa có thể trở thành LEAD dù lane chưa đạt confidence khóa;
@@ -50,7 +50,7 @@ V14.1 vẫn ưu tiên vạch gần xe nhưng thêm xử lý riêng cho thiếu s
 - 40–60 m: far range.
 - 60–100 m: long range; số đo được làm tròn và thường có dấu `~`.
 
-Camera đơn không phải radar/LiDAR. Ở 60–100 m và ban đêm, V14.1 coi kết quả là ước lượng và dùng biên sai số bảo thủ.
+Camera đơn không phải radar/LiDAR. Ở 60–100 m và ban đêm, V15 coi kết quả là ước lượng và dùng biên sai số bảo thủ.
 
 ## 9. Xe trái/phải lấn làn
 Side Guard chạy nền. Xe bên chỉ được đưa lên HUD khi:
@@ -61,7 +61,7 @@ Side Guard chạy nền. Xe bên chỉ được đưa lên HUD khi:
 Xe chạy song song bình thường không tạo cảnh báo chỉ vì ở gần.
 
 ## 10. Người đi bộ
-V14.1 chỉ ưu tiên người khi:
+V15 chỉ ưu tiên người khi:
 - nằm trong lõi ego path;
 - hoặc rất gần lõi ego path ở cự ly ngắn.
 
@@ -73,7 +73,7 @@ Khi TẮT, pipeline biển báo/OCR không chạy. Khi BẬT, app ưu tiên bi�
 - Điều này giúp phân biệt trạng thái đang áp dụng với biển vừa được camera đọc trong frame hiện tại.
 
 ## 12. Nhiệt máy
-V14.1 tiếp tục dùng Thermal Guard NORMAL → BALANCED → HOT → VERY_HOT. Center-focus ban đêm chạy xen kẽ, không chạy đồng thời với full-frame, để hạn chế tăng tải quá mức.
+V15 tiếp tục dùng Thermal Guard NORMAL → BALANCED → HOT → VERY_HOT. Center-focus ban đêm chạy xen kẽ, không chạy đồng thời với full-frame, để hạn chế tăng tải quá mức.
 
 ## 13. DEBUG ADAS
 Nhấn giữ chip trạng thái phía trên để bật/tắt DEBUG. Debug hiển thị FPS, lane confidence, lead ID, range quality, TTC và thermal; không lưu video.
@@ -81,7 +81,14 @@ Nhấn giữ chip trạng thái phía trên để bật/tắt DEBUG. Debug hiể
 ## 14. Bản quyền
 - Cài mới: dùng thử 5 phút foreground.
 - Hết trial: mở **BẢN QUYỀN / KEY**, gửi MÃ THIẾT BỊ cho Admin.
-- V14.1 giữ cùng hệ key với V12/V13/V14; app Admin hiện tại tiếp tục cấp key được.
+- V15 giữ cùng hệ key với V12/V13/V15; app Admin hiện tại tiếp tục cấp key được.
 
 ## 15. Lưu ý sử dụng
-V14.1 là công cụ hỗ trợ quan sát thử nghiệm bằng camera điện thoại, không phải ADAS/radar được chứng nhận và không điều khiển phanh/vô-lăng. Luôn ưu tiên quan sát thực tế, biển báo thật và điều kiện giao thông.
+V15 là công cụ hỗ trợ quan sát thử nghiệm bằng camera điện thoại, không phải ADAS/radar được chứng nhận và không điều khiển phanh/vô-lăng. Luôn ưu tiên quan sát thực tế, biển báo thật và điều kiện giao thông.
+
+
+## V15 - GIỌNG NÓI
+V15 chỉ phát TTS cho các mốc khoảng cách của xe LEAD phía trước. Mọi cảnh báo lane/cut-in/người/biển báo/tốc độ/nhiệt/safe-gap chỉ hiển thị bằng hình/chữ, không đọc tiếng.
+
+## V15 - LANE CORE MỚI
+Lane Core cũ được thay bằng model chuyên dụng Ultra-Fast-Lane-Detection CULane. CV Near-First vẫn chạy làm lớp kiểm tra chéo; Road Core/CENTER fallback tiếp tục hoạt động độc lập khi chưa khóa được lane.

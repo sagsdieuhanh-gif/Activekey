@@ -1,10 +1,9 @@
-name: TRUNGKIEN V14.1 NIGHT CENTER Android Build
+name: TRUNGKIEN V15 Dedicated Lane Android Build
 
 on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
-  pull_request:
 
 jobs:
   build:
@@ -21,9 +20,23 @@ jobs:
           gradle-version: '9.5.0'
       - name: Install Android SDK packages
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-      - name: Build V14.1 NIGHT CENTER protected offline-core APK
+      - name: Stage V15 dedicated UFLD CULane model
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ufld app/offline_models
+          curl -L --retry 3 --connect-timeout 30 \
+            "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/140_Ultra-Fast-Lane-Detection/resources_culane.tar.gz" \
+            -o /tmp/ufld.tar.gz
+          tar -xzf /tmp/ufld.tar.gz -C /tmp/ufld
+          MODEL="$(find /tmp/ufld -type f -name '*.onnx' | grep -Ei 'culane|288|800' | grep -Evi 'int8|uint8|fp16|float16' | head -n 1 || true)"
+          if [ -z "$MODEL" ]; then MODEL="$(find /tmp/ufld -type f -name '*.onnx' | head -n 1)"; fi
+          test -n "$MODEL"
+          cp "$MODEL" app/offline_models/lane_core.dat
+          echo "Dedicated lane model: $MODEL ($(du -h app/offline_models/lane_core.dat | cut -f1))"
+      - name: Build V15 dedicated-lane front-distance-only APK
         run: gradle --no-daemon clean assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: TRUNGKIEN-V14.1-debug-apk
+          name: TRUNGKIEN-V15-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk

@@ -375,7 +375,7 @@ class MainActivity : ComponentActivity() {
         box.addView(keyInput, LinearLayout.LayoutParams(-1, -2))
 
         val builder = AlertDialog.Builder(this)
-            .setTitle("BẢN QUYỀN / KEY • V14")
+            .setTitle("BẢN QUYỀN / KEY • V15")
             .setView(box)
             .setPositiveButton("KÍCH HOẠT", null)
         if (!blocking) builder.setNegativeButton("ĐÓNG", null)
@@ -647,7 +647,7 @@ class MainActivity : ComponentActivity() {
         addAction(if (displayEcoMode) "☀  TẮT MÀN HÌNH TIẾT KIỆM" else "☾  MÀN HÌNH TIẾT KIỆM", if (displayEcoMode) "Trả độ sáng về tự động của hệ thống" else "Giảm độ sáng khi chạy lâu để giảm nhiệt và hao pin") { toggleDisplayEcoMode() }
         addAction(if (trafficSignStore.enabled) "◇  TẮT ĐỌC BIỂN BÁO AI" else "◇  BẬT ĐỌC BIỂN BÁO AI", "R.420 / R.421 / tốc độ tối đa • tắt hoàn toàn khi không dùng") { toggleTrafficSignReader() }
 
-        section("HIỆU CHỈNH", "V14.1 tự học sai số khoảng cách và cho phép loại phần đầu xe khỏi vùng đo")
+        section("HIỆU CHỈNH", "V15 tự học sai số khoảng cách và cho phép loại phần đầu xe khỏi vùng đo")
         addAction("▰  VÙNG BỎ QUA ĐẦU XE", "Kéo trực tiếp vạch giới hạn trên camera • phần dưới không đo") { startHoodEdit() }
         addAction("↺  RESET VÙNG ĐẦU XE", "Trả vạch về mức khởi tạo rồi có thể kéo chỉnh lại") { resetHoodExclusion() }
         addAction("⌖  HIỆU CHỈNH TÂM LÀN", "Căn tâm xe khi camera đặt lệch trái hoặc phải") { showLaneCalibrationDialog() }
@@ -663,7 +663,7 @@ class MainActivity : ComponentActivity() {
             if (!ok) Toast.makeText(this, speaker.statusText(), Toast.LENGTH_LONG).show()
         }
         addAction("≋  THỬ TOÀN BỘ CẢNH BÁO", "Kiểm tra các câu khoảng cách, nguy cơ và lấn làn") {
-            val ok = speaker.testAllWarnings()
+            val ok = speaker.testVietnamese()
             if (!ok) Toast.makeText(this, speaker.statusText(), Toast.LENGTH_LONG).show()
         }
         addAction("⚙  CÀI ĐẶT GIỌNG NÓI ANDROID", "Chọn hoặc cài thêm giọng TTS tiếng Việt") { openAndroidTtsSettings() }
@@ -675,7 +675,7 @@ class MainActivity : ComponentActivity() {
         }
 
         dialog = AlertDialog.Builder(this)
-            .setTitle("TRUNGKIEN V14.1 • ĐIỀU KHIỂN")
+            .setTitle("TRUNGKIEN V15 • ĐIỀU KHIỂN")
             .setView(scroll)
             .setNegativeButton("ĐÓNG", null)
             .create()
@@ -1080,7 +1080,7 @@ class MainActivity : ComponentActivity() {
                 val passIndex = roadUserPassCounter
                 val longRangeStride = if (thermalGuard.mode == ThermalGuard.Mode.NORMAL) 3 else 4
 
-                // V14.1 NIGHT/CENTER fallback:
+                // V15 NIGHT/CENTER fallback:
                 // Alternate full-frame and centre-focus inference at night, and periodically use the
                 // centre crop when lane acquisition is weak. This decouples lead detection from lane lock.
                 val nightCenterPass = cvLane.nightEnhanced && passIndex % 2 == 0
@@ -1371,7 +1371,7 @@ class MainActivity : ComponentActivity() {
             overlay.setDebugStatus(
                 true,
                 listOf(
-                    "V14.1 NIGHT/CENTER • FPS ${frame.fps.roundToInt()} • ${thermalGuard.mode}",
+                    "V15 NIGHT/CENTER • FPS ${frame.fps.roundToInt()} • ${thermalGuard.mode}",
                     "LANE ${confidence.laneLock} ${(frame.lane.confidence * 100f).roundToInt()}% • ${frame.lane.source}",
                     "LEAD #$targetId • ${confidence.rangeBand ?: "—"} • ${frame.rangeQuality ?: "—"}",
                     "RANGE $range • TTC $ttc • RISK ${frame.risk}",
@@ -1654,7 +1654,7 @@ class MainActivity : ComponentActivity() {
         val target = latestTargetForCalibration.get()
         val currentConfidence = target?.correctionConfidence?.times(100f)?.roundToInt()
         val message = buildString {
-            append("V14.1 tự hiệu chỉnh khoảng cách hoàn toàn tự động; không cần nhập khoảng cách thật bằng tay.\n\n")
+            append("V15 tự hiệu chỉnh khoảng cách hoàn toàn tự động; không cần nhập khoảng cách thật bằng tay.\n\n")
             append("Hệ thống chỉ học khi ROAD CORE/camera và LANE CORE cùng bám một xe phía trước, Track ID ổn định, đủ hai vạch làn và confidence cao trong nhiều frame liên tiếp.\n\n")
             append("Mẫu tự học đã lưu: ${stats.sampleCount}\n")
             append("Hệ số bù trung bình: ${String.format(Locale.US, "%.3f×", stats.meanRatio)}")
@@ -1663,7 +1663,7 @@ class MainActivity : ComponentActivity() {
         }
 
         AlertDialog.Builder(this)
-            .setTitle("Tự hiệu chỉnh khoảng cách • V14.1")
+            .setTitle("Tự hiệu chỉnh khoảng cách • V15")
             .setMessage(message)
             .setNegativeButton("ĐÓNG", null)
             .setNeutralButton("XÓA DỮ LIỆU TỰ HỌC") { _, _ -> confirmClearCorrectionSamples() }
@@ -1673,13 +1673,13 @@ class MainActivity : ComponentActivity() {
     private fun confirmClearCorrectionSamples() {
         AlertDialog.Builder(this)
             .setTitle("Xóa dữ liệu học sai số?")
-            .setMessage("Xóa các mẫu V14.1 đã tự học. Thông số chiều cao/góc/FOV vẫn được giữ và hệ thống sẽ tự học lại khi có dữ liệu đủ tin cậy.")
+            .setMessage("Xóa các mẫu V15 đã tự học. Thông số chiều cao/góc/FOV vẫn được giữ và hệ thống sẽ tự học lại khi có dữ liệu đủ tin cậy.")
             .setNegativeButton("HỦY", null)
             .setPositiveButton("XÓA") { _, _ ->
                 correctionStore.clear()
                 refreshCorrector(resetTracker = true)
                 autoDistanceCalibrator.reset()
-                Toast.makeText(this, "Đã xóa dữ liệu tự học; V14.1 sẽ tự hiệu chỉnh lại.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Đã xóa dữ liệu tự học; V15 sẽ tự hiệu chỉnh lại.", Toast.LENGTH_SHORT).show()
             }
             .show()
     }

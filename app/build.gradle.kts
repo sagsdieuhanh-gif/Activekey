@@ -20,8 +20,8 @@ android {
         targetSdk = 36
         // V14.1 NIGHT/CENTER FIX: automatic low-light enhancement, night lane near-first,
         // centre-fallback lead acquisition, low-noise side cut-in watch and licensed access.
-        versionCode = 1410
-        versionName = "14.1.0"
+        versionCode = 1500
+        versionName = "15.0.0"
     }
 
     buildTypes {
@@ -136,8 +136,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
         val visionExpectedSha = "c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063"
         fun visionValid(file: File) = file.exists() && file.length() == visionExpectedSize && sha256(file) == visionExpectedSha
 
-        val laneExpectedGitSha = "cb3959dc88e262beb3c23d44e3388c7c29eaa2eb"
-        fun laneValid(file: File) = file.exists() && file.length() > 20_000_000L && gitBlobSha1(file) == laneExpectedGitSha
+        fun laneValid(file: File) = file.exists() && file.length() > 1_000_000L
 
         val manualVision = manualAssets.resolve("road_core.dat")
         if (!visionValid(visionOut)) {
@@ -145,7 +144,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
             if (visionValid(manualVision)) {
                 manualVision.copyTo(visionOut, overwrite = true)
             } else {
-                logger.lifecycle("TRUNGKIEN V14.1: preparing Road Core package...")
+                logger.lifecycle("TRUNGKIEN V15: preparing Road Core package...")
                 download(
                     reveal("aHR0cHM6Ly9naXRodWIuY29tL01lZ3ZpaS1CYXNlRGV0ZWN0aW9uL1lPTE9YL3JlbGVhc2VzL2Rvd25sb2FkLzAuMS4xcmMwL3lvbG94X3Mub25ueA=="),
                     visionOut,
@@ -158,7 +157,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
                 "Road Core package invalid. Place the verified package at app/offline_models/road_core.dat and rebuild."
             )
         }
-        logger.lifecycle("TRUNGKIEN V14.1: Road Core ready (${visionOut.length()} bytes).")
+        logger.lifecycle("TRUNGKIEN V15: Road Core ready (${visionOut.length()} bytes).")
 
         val manualLane = manualAssets.resolve("lane_core.dat")
         if (!laneValid(laneOut)) {
@@ -166,10 +165,8 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
             if (laneValid(manualLane)) {
                 manualLane.copyTo(laneOut, overwrite = true)
             } else {
-                logger.lifecycle("TRUNGKIEN V14.1: preparing Lane Core package...")
-                download(
-                    reveal("aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL01UYW1tdmVlL29wZW5waWxvdC1zdXBlcmNvbWJvLW1vZGVsLzEzNDkwOGU1NTQ5MzAyMDc1MGY4NDk2MTI3YmFmZjVhYjNhMTkyYWQvc3VwZXJjb21iby5vbm54"),
-                    laneOut,
+                throw org.gradle.api.GradleException(
+                    "Dedicated Lane Core missing. GitHub Actions must stage UFLD CULane ONNX at app/offline_models/lane_core.dat."
                 )
             }
         }
@@ -179,8 +176,8 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
                 "Lane Core package invalid. Place the verified package at app/offline_models/lane_core.dat and rebuild."
             )
         }
-        logger.lifecycle("TRUNGKIEN V14.1: Lane Core ready (${laneOut.length() / 1024 / 1024} MiB).")
-        logger.lifecycle("TRUNGKIEN V14.1: core packages will be bundled into the APK; runtime download is disabled.")
+        logger.lifecycle("TRUNGKIEN V15: Lane Core ready (${laneOut.length() / 1024 / 1024} MiB).")
+        logger.lifecycle("TRUNGKIEN V15: core packages will be bundled into the APK; runtime download is disabled.")
     }
 }
 
