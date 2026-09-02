@@ -18,6 +18,8 @@ data class RoadSenseFrame(
     val longRangeFront: Boolean = false,
     /** Mean scene luminance sampled from the camera frame, 0..255. */
     val meanLuma: Float,
+    /** Fraction of sampled pixels with low luminance; helps detect night scenes with bright lamps. */
+    val darkRatio: Float,
     /** True when NIGHT AUTO enhancement was applied. */
     val nightMode: Boolean,
 ) {
@@ -29,7 +31,7 @@ data class RoadSenseFrame(
  * preserve aspect ratio, place resized image at top-left, fill the remaining area with 114.
  * The model uses raw 0..255 float values (no mean/std normalization).
  *
- * V3 keeps NIGHT AUTO. In dark scenes a mild gamma lift is applied before inference. It is
+ * V14.1 keeps NIGHT AUTO. In dark scenes a mild gamma lift is applied before inference. It is
  * deliberately conservative so headlamps/signs are not exaggerated too aggressively.
  */
 class RoadSensePreprocessor(
@@ -41,7 +43,8 @@ class RoadSensePreprocessor(
 
     private val nightLut = IntArray(256) { v ->
         val x = v / 255.0
-        (255.0 * x.pow(0.78)).toInt().coerceIn(0, 255)
+        // Stronger shadow lift than V14, still preserving highlight headroom.
+        (255.0 * x.pow(0.68)).toInt().coerceIn(0, 255)
     }
 
     fun preprocess(image: ImageProxy, longRangeFront: Boolean = false): RoadSenseFrame {
@@ -59,18 +62,21 @@ class RoadSensePreprocessor(
         // Alternate front long-range crop: spend the same 640x640 detector budget on the central
         // road corridor so a 60-100 m car occupies more pixels. Full-frame passes still run between
         // these crops, preserving cut-in/side awareness.
-        val cropLeft = if (longRangeFront) 0.22f else 0f
-        val cropTop = if (longRangeFront) 0.14f else 0f
-        val cropWidth = if (longRangeFront) 0.56f else 1f
-        val cropHeight = if (longRangeFront) 0.64f else 1f
+        val cropLeft = if (longRangeFront) 0.21f else 0f
+        val cropTop = if (longRangeFront) 0.10f else 0f
+        val cropWidth = if (longRangeFront) 0.58f else 1f
+        val cropHeight = if (longRangeFront) 0.74f else 1f
         val displayW = (fullDisplayW * cropWidth).toInt().coerceAtLeast(1)
         val displayH = (fullDisplayH * cropHeight).toInt().coerceAtLeast(1)
         val ratio = minOf(modelSize.toFloat() / displayW, modelSize.toFloat() / displayH)
         val resizedW = (displayW * ratio).toInt().coerceIn(1, modelSize)
         val resizedH = (displayH * ratio).toInt().coerceIn(1, modelSize)
 
-        val meanLuma = estimateSceneLuma(image, rotation)
-        val nightMode = meanLuma < NIGHT_LUMA_THRESHOLD
+        val sceneLight = estimateSceneLight(image, rotation)
+        val meanLuma = sceneLight.first
+        val darkRatio = sceneLight.second
+        // Mean-only detection missed lamp-lit night scenes. A dark-pixel ratio catches those cases.
+        val nightMode = meanLuma < NIGHT_LUMA_THRESHOLD || darkRatio >= NIGHT_DARK_RATIO_THRESHOLD
 
         java.util.Arrays.fill(reusableInput, 114f)
         val gOffset = planePixels
@@ -122,16 +128,18 @@ class RoadSensePreprocessor(
             cropHeightNorm = cropHeight,
             longRangeFront = longRangeFront,
             meanLuma = meanLuma,
+            darkRatio = darkRatio,
             nightMode = nightMode,
         )
     }
 
-    private fun estimateSceneLuma(image: ImageProxy, rotation: Int): Float {
+    private fun estimateSceneLight(image: ImageProxy, rotation: Int): Pair<Float, Float> {
         val plane = image.planes[0]
         var sum = 0L
+        var dark = 0
         var count = 0
-        val sampleX = 16
-        val sampleY = 12
+        val sampleX = 18
+        val sampleY = 14
         for (gy in 0 until sampleY) {
             val v = (gy + 0.5f) / sampleY
             for (gx in 0 until sampleX) {
@@ -151,15 +159,21 @@ class RoadSensePreprocessor(
                 val r = scratch[src].toInt() and 0xFF
                 val g = scratch[src + 1].toInt() and 0xFF
                 val b = scratch[src + 2].toInt() and 0xFF
-                // Integer approximation of Rec.709 luma.
-                sum += ((54 * r + 183 * g + 19 * b) shr 8)
+                val luma = ((54 * r + 183 * g + 19 * b) shr 8)
+                sum += luma
+                if (luma < NIGHT_DARK_PIXEL_LUMA) dark++
                 count++
             }
         }
-        return if (count > 0) sum.toFloat() / count else 128f
+        if (count == 0) return 128f to 0f
+        return (sum.toFloat() / count) to (dark.toFloat() / count)
     }
 
     companion object {
-        private const val NIGHT_LUMA_THRESHOLD = 72f
+        // Raised from V14's 72 because street/head lamps made true night scenes look too bright
+        // to the arithmetic mean. Dark-ratio is an additional guard against that failure.
+        private const val NIGHT_LUMA_THRESHOLD = 100f
+        private const val NIGHT_DARK_RATIO_THRESHOLD = 0.48f
+        private const val NIGHT_DARK_PIXEL_LUMA = 72
     }
 }

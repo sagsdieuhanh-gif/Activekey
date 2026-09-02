@@ -1,4 +1,4 @@
-name: TRUNGKIEN V14 CENTER-FIRST Android Build
+name: TRUNGKIEN V14.1 NIGHT CENTER Android Build
 
 on:
   workflow_dispatch:
@@ -21,9 +21,9 @@ jobs:
           gradle-version: '9.5.0'
       - name: Install Android SDK packages
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-      - name: Build V14 CENTER-FIRST protected offline-core APK
+      - name: Build V14.1 NIGHT CENTER protected offline-core APK
         run: gradle --no-daemon clean assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: TRUNGKIEN-V14-debug-apk
+          name: TRUNGKIEN-V14.1-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk

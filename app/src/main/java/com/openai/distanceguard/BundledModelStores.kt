@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
 /**
- * V14 runtime core policy: core packages are bundled into the APK at build time.
+ * V14.1 runtime core policy: core packages are bundled into the APK at build time.
  * The app never downloads core packages while it is running.
  */
 object BundledModelStores {
@@ -27,7 +27,7 @@ object BundledModelStores {
         out.delete()
         if (!copyAsset(context, LANE_CORE_NAME, out) || !isValidLaneCore(out)) {
             out.delete()
-            return Result.failure(IllegalStateException("APK thiếu hoặc sai mô-đun Lane Core. Hãy rebuild V14 để đóng model vào APK."))
+            return Result.failure(IllegalStateException("APK thiếu hoặc sai mô-đun Lane Core. Hãy rebuild V14.1 để đóng model vào APK."))
         }
         return Result.success(out)
     }
@@ -38,7 +38,7 @@ object BundledModelStores {
         out.delete()
         if (!copyAsset(context, ROAD_CORE_NAME, out) || !isValidRoadCore(out)) {
             out.delete()
-            return Result.failure(IllegalStateException("APK thiếu hoặc sai mô-đun Road Core. Hãy rebuild V14 để đóng model vào APK."))
+            return Result.failure(IllegalStateException("APK thiếu hoặc sai mô-đun Road Core. Hãy rebuild V14.1 để đóng model vào APK."))
         }
         return Result.success(out)
     }

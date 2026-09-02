@@ -107,7 +107,7 @@ class TargetSelector(
      * better for a short hysteresis interval before it can take over. This prevents the common
      * multi-lane failure where the nearest box changes every detector inference.
      */
-    fun select(detections: List<Detection>, nowNs: Long, lane: LaneState? = null): TargetMeasurement? {
+    fun select(detections: List<Detection>, nowNs: Long, lane: LaneState? = null, nightMode: Boolean = false): TargetMeasurement? {
         val candidates = detections.mapNotNull { detection ->
             if (detection.classId !in VehicleClasses.roadVehicles) return@mapNotNull null
             val minRoadY = (estimator.horizonYNorm() + 0.004f).coerceIn(0.10f, 0.72f)
@@ -115,14 +115,18 @@ class TargetSelector(
             val membership = laneMembership(detection, lane)
             val fourWheel = detection.classId == VehicleClasses.CAR ||
                 detection.classId == VehicleClasses.BUS || detection.classId == VehicleClasses.TRUCK
-            // V14 CENTER-FIRST: candidates must actually occupy the ego corridor. Two-wheel
+            // V14.1 CENTER-FIRST: candidates must actually occupy the ego corridor. Two-wheel
             // vehicles beside us remain in the side/cut-in monitor instead of stealing lead focus.
             val minOverlap = if (membership.reliable) {
                 if (fourWheel) 0.30f else 0.52f
             } else {
-                if (fourWheel) 0.22f else 0.44f
+                // V14.1 center fallback is deliberately permissive only for four-wheel objects
+                // in low light; two-wheel traffic still needs to be deep in the funnel.
+                if (fourWheel) (if (nightMode) 0.15f else 0.22f) else 0.44f
             }
-            val minCentrality = if (fourWheel) 0.24f else 0.52f
+            val minCentrality = if (fourWheel) {
+                if (nightMode && !membership.reliable) 0.16f else 0.24f
+            } else 0.52f
             if ((!membership.centerInside && membership.overlap < minOverlap) ||
                 membership.centrality < minCentrality
             ) return@mapNotNull null
@@ -142,7 +146,7 @@ class TargetSelector(
             return null
         }
 
-        val scored = candidates.map { it to targetScore(it, lane) }
+        val scored = candidates.map { it to targetScore(it, lane, nightMode) }
         val best = scored.maxByOrNull { it.second } ?: return null
         val current = if (lockedTrackId > 0) {
             scored.firstOrNull { it.first.detection.trackId == lockedTrackId }
@@ -161,7 +165,7 @@ class TargetSelector(
                 return null
             }
             val ready = scored
-                .filter { initialLockReady(it.first, nowNs, lane) }
+                .filter { initialLockReady(it.first, nowNs, lane, nightMode) }
                 .maxByOrNull { it.second }
                 ?: return null
             lock(ready.first, nowNs)
@@ -235,29 +239,31 @@ class TargetSelector(
      * A new lead must persist for a few detector updates before it is allowed to own the HUD.
      * Very close, well-centred vehicles lock faster; off-centre/two-wheel candidates need longer.
      */
-    private fun initialLockReady(target: TargetMeasurement, nowNs: Long, lane: LaneState?): Boolean {
+    private fun initialLockReady(target: TargetMeasurement, nowNs: Long, lane: LaneState?, nightMode: Boolean): Boolean {
         val d = target.detection
         if (d.predicted) return false
         val life = candidateLife[stableId(d)] ?: return false
         val membership = laneMembership(d, lane)
         val fourWheel = d.classId == VehicleClasses.CAR || d.classId == VehicleClasses.BUS || d.classId == VehicleClasses.TRUCK
         val dwellNs = when {
+            nightMode && fourWheel && !membership.reliable && membership.centrality >= 0.52f -> 110_000_000L
             target.correctedDistanceM <= 12f && membership.centrality >= 0.66f -> 100_000_000L
-            target.correctedDistanceM >= 60f && fourWheel && membership.centrality >= 0.62f -> 360_000_000L
+            target.correctedDistanceM >= 60f && fourWheel && membership.centrality >= 0.62f -> if (nightMode) 280_000_000L else 360_000_000L
             fourWheel && membership.centrality >= 0.68f && membership.overlap >= 0.62f -> 160_000_000L
-            fourWheel -> 290_000_000L
+            fourWheel -> if (nightMode) 220_000_000L else 290_000_000L
             else -> 520_000_000L
         }
         val minHits = when {
+            nightMode && fourWheel && !membership.reliable && membership.centrality >= 0.52f -> 2
             target.correctedDistanceM <= 12f && membership.centrality >= 0.66f -> 2
-            target.correctedDistanceM >= 60f -> 4
-            fourWheel -> 3
+            target.correctedDistanceM >= 60f -> if (nightMode && fourWheel) 3 else 4
+            fourWheel -> if (nightMode) 2 else 3
             else -> 4
         }
         return life.hits >= minHits && nowNs - life.firstSeenNs >= dwellNs
     }
 
-    private fun targetScore(target: TargetMeasurement, lane: LaneState?): Float {
+    private fun targetScore(target: TargetMeasurement, lane: LaneState?, nightMode: Boolean): Float {
         val d = target.detection
         val membership = laneMembership(d, lane)
         val centrality = membership.centrality
@@ -277,12 +283,15 @@ class TargetSelector(
         val twoWheelOffCenterPenalty = if (!fourWheel && (centrality < 0.78f || overlap < 0.64f)) 2.10f else 0f
         val offCenterPenalty = if (centrality < 0.28f) (0.28f - centrality) * 4.0f else 0f
         val laneConfidenceBonus = if (membership.reliable) overlap * 0.52f else 0f
+        val nightCenterBonus = if (nightMode && fourWheel && !membership.reliable && centrality >= 0.50f) 0.58f else 0f
 
-        // V14 CENTER-FIRST: centre-path membership dominates detector confidence, raw nearness and
-        // even class. Side objects stay background unless they truly move into the ego corridor.
+        // V14.1 CENTER-FIRST NIGHT FALLBACK: centre-path membership dominates detector confidence.
+        // When lane lock is unavailable at night, a stable four-wheel object in the middle funnel
+        // can still own the HUD instead of disappearing with the lane.
         return centrality * 2.85f + overlap * 1.35f + laneConfidenceBonus + nearScore * 0.30f +
             d.score.coerceIn(0f, 1f) * 0.18f + areaScore * 0.08f + classPriority +
-            frontBonus + longRangeFrontBonus - twoWheelOffCenterPenalty - offCenterPenalty - predictedPenalty
+            frontBonus + longRangeFrontBonus + nightCenterBonus -
+            twoWheelOffCenterPenalty - offCenterPenalty - predictedPenalty
     }
 
     private data class LaneMembership(
@@ -354,7 +363,7 @@ class TargetSelector(
         fun laneBoundsAt(y: Float): Pair<Float, Float> {
             val yy = y.coerceIn(0.20f, 1f)
             val t = ((yy - 0.20f) / (1f - 0.20f)).coerceIn(0f, 1f)
-            // Narrower V14 fallback funnel. When lane confidence is weak we would rather miss a
+            // Narrower V14.1 fallback funnel. When lane confidence is weak we would rather miss a
             // side vehicle than promote it to the primary lead.
             val halfWidth = 0.10f + t * 0.25f
             return (0.5f - halfWidth) to (0.5f + halfWidth)

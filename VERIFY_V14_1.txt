@@ -1,0 +1,11 @@
+TRUNGKIEN V14.1.0 — QUICK VERIFY
+
+1. app/build.gradle.kts: versionName 14.1.0, versionCode 1410.
+2. Workflow artifact: TRUNGKIEN-V14.1-debug-apk.
+3. Android API 36 / Java 17.
+4. Search source user app for PRIVATE KEY: must return none.
+5. Core Kotlin compile check: LaneDetector + LaneHybridFusion + TargetSelector + RoadUserTemporalFilter.
+6. NIGHT AUTO logic should classify the supplied lamp-lit night screenshots as night based on mean/dark-ratio criteria.
+7. Night/lane weak path alternates full-frame and centre-focus Road Core.
+8. Lane warning remains confidence-gated; low-confidence night lane is visual/estimated only.
+9. HDSD.md updated for V14.1.

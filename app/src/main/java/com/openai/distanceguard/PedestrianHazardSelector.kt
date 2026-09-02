@@ -3,7 +3,7 @@ package com.openai.distanceguard
 import kotlin.math.max
 
 /**
- * V14 CENTER-FIRST pedestrian gate.
+ * V14.1 CENTER-FIRST pedestrian gate.
  *
  * People on pavements, shoulders and adjacent lanes are intentionally kept out of the driver HUD.
  * A pedestrian becomes relevant only when the lower-centre of the box is inside the central ego

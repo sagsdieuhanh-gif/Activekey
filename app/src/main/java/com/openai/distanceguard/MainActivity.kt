@@ -647,7 +647,7 @@ class MainActivity : ComponentActivity() {
         addAction(if (displayEcoMode) "☀  TẮT MÀN HÌNH TIẾT KIỆM" else "☾  MÀN HÌNH TIẾT KIỆM", if (displayEcoMode) "Trả độ sáng về tự động của hệ thống" else "Giảm độ sáng khi chạy lâu để giảm nhiệt và hao pin") { toggleDisplayEcoMode() }
         addAction(if (trafficSignStore.enabled) "◇  TẮT ĐỌC BIỂN BÁO AI" else "◇  BẬT ĐỌC BIỂN BÁO AI", "R.420 / R.421 / tốc độ tối đa • tắt hoàn toàn khi không dùng") { toggleTrafficSignReader() }
 
-        section("HIỆU CHỈNH", "V14 tự học sai số khoảng cách và cho phép loại phần đầu xe khỏi vùng đo")
+        section("HIỆU CHỈNH", "V14.1 tự học sai số khoảng cách và cho phép loại phần đầu xe khỏi vùng đo")
         addAction("▰  VÙNG BỎ QUA ĐẦU XE", "Kéo trực tiếp vạch giới hạn trên camera • phần dưới không đo") { startHoodEdit() }
         addAction("↺  RESET VÙNG ĐẦU XE", "Trả vạch về mức khởi tạo rồi có thể kéo chỉnh lại") { resetHoodExclusion() }
         addAction("⌖  HIỆU CHỈNH TÂM LÀN", "Căn tâm xe khi camera đặt lệch trái hoặc phải") { showLaneCalibrationDialog() }
@@ -675,7 +675,7 @@ class MainActivity : ComponentActivity() {
         }
 
         dialog = AlertDialog.Builder(this)
-            .setTitle("TRUNGKIEN V14 • ĐIỀU KHIỂN")
+            .setTitle("TRUNGKIEN V14.1 • ĐIỀU KHIỂN")
             .setView(scroll)
             .setNegativeButton("ĐÓNG", null)
             .create()
@@ -1076,17 +1076,27 @@ class MainActivity : ComponentActivity() {
             if (roadUserDetector != null && timestamp - lastRoadUserSubmitNs >= thermalProfile.visionIntervalNs && roadUserInferenceBusy.compareAndSet(false, true)) {
                 lastRoadUserSubmitNs = timestamp
                 val longRangeAllowed = thermalGuard.mode == ThermalGuard.Mode.NORMAL || thermalGuard.mode == ThermalGuard.Mode.BALANCED
+                roadUserPassCounter = (roadUserPassCounter + 1).coerceAtMost(1_000_000)
+                val passIndex = roadUserPassCounter
                 val longRangeStride = if (thermalGuard.mode == ThermalGuard.Mode.NORMAL) 3 else 4
-                val longRangeFrontPass = longRangeAllowed &&
-                    (egoSpeed ?: 0f) >= 16.5f && (++roadUserPassCounter % longRangeStride == 0)
-                val roadUserInput = roadSensePreprocessor.preprocess(image, longRangeFront = longRangeFrontPass)
+
+                // V14.1 NIGHT/CENTER fallback:
+                // Alternate full-frame and centre-focus inference at night, and periodically use the
+                // centre crop when lane acquisition is weak. This decouples lead detection from lane lock.
+                val nightCenterPass = cvLane.nightEnhanced && passIndex % 2 == 0
+                val weakLaneCenterPass = cvLane.confidence < 0.22f &&
+                    (egoSpeed ?: 0f) >= 3.5f && passIndex % 3 == 0
+                val highSpeedLongRangePass = longRangeAllowed &&
+                    (egoSpeed ?: 0f) >= 13.0f && passIndex % longRangeStride == 0
+                val frontFocusPass = nightCenterPass || weakLaneCenterPass || highSpeedLongRangePass
+                val roadUserInput = roadSensePreprocessor.preprocess(image, longRangeFront = frontFocusPass)
                 roadUserExecutor.execute {
                     val detectorStarted = System.nanoTime()
                     try {
                         val rawThreshold = when {
-                            roadUserInput.longRangeFront && roadUserInput.nightMode -> 0.082f
-                            roadUserInput.longRangeFront -> 0.100f
-                            roadUserInput.nightMode -> 0.10f
+                            roadUserInput.longRangeFront && roadUserInput.nightMode -> 0.060f
+                            roadUserInput.nightMode -> 0.078f
+                            roadUserInput.longRangeFront -> 0.095f
                             else -> 0.13f
                         }
                         val rawDetections = roadUserDetector.detect(roadUserInput, rawThreshold)
@@ -1109,7 +1119,9 @@ class MainActivity : ComponentActivity() {
                             val vehicles = detections.count { it.classId in VehicleClasses.roadVehicles }
                             val mode = buildString {
                                 if (roadUserInput.nightMode) append(" • NIGHT AUTO")
-                                if (roadUserInput.longRangeFront) append(" • LONG 100m")
+                                if (roadUserInput.longRangeFront) {
+                                    append(if (roadUserInput.nightMode) " • CENTER" else " • CENTER/LONG")
+                                }
                             }
                             modelStatus.text = if (vehicles > 0) {
                                 "ROAD CORE: phát hiện $vehicles phương tiện$mode"
@@ -1178,7 +1190,12 @@ class MainActivity : ComponentActivity() {
             // partial/rear vehicle detections useful while reducing the large long-range jumps that
             // a few bbox pixels can create with monocular pinhole geometry.
             val detectionTimestamp = roadUserStamp?.timestampNs ?: timestamp
-            val rawVisionTarget = targetSelector.select(roadUsers, detectionTimestamp, lane)
+            val rawVisionTarget = targetSelector.select(
+                roadUsers,
+                detectionTimestamp,
+                lane,
+                nightMode = roadUserStamp?.nightMode == true || lane.nightEnhanced,
+            )
             val rawTrackId = rawVisionTarget?.detection?.trackId ?: -1
             if (rawTrackId > 0 && lastRangeTrackId > 0 && rawTrackId != lastRangeTrackId) {
                 // A confirmed target-ID handover starts a fresh range/TTC history. Without this, the
@@ -1354,7 +1371,7 @@ class MainActivity : ComponentActivity() {
             overlay.setDebugStatus(
                 true,
                 listOf(
-                    "V14 CENTER-FIRST • FPS ${frame.fps.roundToInt()} • ${thermalGuard.mode}",
+                    "V14.1 NIGHT/CENTER • FPS ${frame.fps.roundToInt()} • ${thermalGuard.mode}",
                     "LANE ${confidence.laneLock} ${(frame.lane.confidence * 100f).roundToInt()}% • ${frame.lane.source}",
                     "LEAD #$targetId • ${confidence.rangeBand ?: "—"} • ${frame.rangeQuality ?: "—"}",
                     "RANGE $range • TTC $ttc • RISK ${frame.risk}",
@@ -1571,7 +1588,8 @@ class MainActivity : ComponentActivity() {
             LaneSource.CV_FALLBACK -> "CV"
             LaneSource.HYBRID_ESTIMATED -> "ƯỚC LƯỢNG"
         }
-        val debugSuffix = if (debugMode) " • $source • $confidencePct%" else ""
+        val nightSuffix = if (lane.nightEnhanced) " • NIGHT" else ""
+        val debugSuffix = if (debugMode) " • $source • $confidencePct%$nightSuffix" else nightSuffix
         when (lane.departureLevel) {
             LaneDepartureLevel.WARNING -> {
                 laneText.visibility = View.VISIBLE
@@ -1600,7 +1618,11 @@ class MainActivity : ComponentActivity() {
             }
             LaneDepartureLevel.UNAVAILABLE -> {
                 laneText.visibility = View.VISIBLE
-                laneText.text = "LÀN: ĐANG TÌM"
+                laneText.text = if (lane.nightEnhanced) {
+                    "LÀN: ĐANG TÌM • NIGHT CENTER"
+                } else {
+                    "LÀN: ĐANG TÌM"
+                }
                 laneText.setTextColor(Color.LTGRAY)
             }
         }
@@ -1632,7 +1654,7 @@ class MainActivity : ComponentActivity() {
         val target = latestTargetForCalibration.get()
         val currentConfidence = target?.correctionConfidence?.times(100f)?.roundToInt()
         val message = buildString {
-            append("V14 tự hiệu chỉnh khoảng cách hoàn toàn tự động; không cần nhập khoảng cách thật bằng tay.\n\n")
+            append("V14.1 tự hiệu chỉnh khoảng cách hoàn toàn tự động; không cần nhập khoảng cách thật bằng tay.\n\n")
             append("Hệ thống chỉ học khi ROAD CORE/camera và LANE CORE cùng bám một xe phía trước, Track ID ổn định, đủ hai vạch làn và confidence cao trong nhiều frame liên tiếp.\n\n")
             append("Mẫu tự học đã lưu: ${stats.sampleCount}\n")
             append("Hệ số bù trung bình: ${String.format(Locale.US, "%.3f×", stats.meanRatio)}")
@@ -1641,7 +1663,7 @@ class MainActivity : ComponentActivity() {
         }
 
         AlertDialog.Builder(this)
-            .setTitle("Tự hiệu chỉnh khoảng cách • V14")
+            .setTitle("Tự hiệu chỉnh khoảng cách • V14.1")
             .setMessage(message)
             .setNegativeButton("ĐÓNG", null)
             .setNeutralButton("XÓA DỮ LIỆU TỰ HỌC") { _, _ -> confirmClearCorrectionSamples() }
@@ -1651,13 +1673,13 @@ class MainActivity : ComponentActivity() {
     private fun confirmClearCorrectionSamples() {
         AlertDialog.Builder(this)
             .setTitle("Xóa dữ liệu học sai số?")
-            .setMessage("Xóa các mẫu V14 đã tự học. Thông số chiều cao/góc/FOV vẫn được giữ và hệ thống sẽ tự học lại khi có dữ liệu đủ tin cậy.")
+            .setMessage("Xóa các mẫu V14.1 đã tự học. Thông số chiều cao/góc/FOV vẫn được giữ và hệ thống sẽ tự học lại khi có dữ liệu đủ tin cậy.")
             .setNegativeButton("HỦY", null)
             .setPositiveButton("XÓA") { _, _ ->
                 correctionStore.clear()
                 refreshCorrector(resetTracker = true)
                 autoDistanceCalibrator.reset()
-                Toast.makeText(this, "Đã xóa dữ liệu tự học; V14 sẽ tự hiệu chỉnh lại.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Đã xóa dữ liệu tự học; V14.1 sẽ tự hiệu chỉnh lại.", Toast.LENGTH_SHORT).show()
             }
             .show()
     }
@@ -1941,12 +1963,15 @@ class MainActivity : ComponentActivity() {
             )
             return
         }
+        val remembered = state.lastObservation == null &&
+            (state.currentSpeedLimitKmh != null || state.inPopulatedArea != null)
         val suffix = state.currentSpeedLimitKmh?.let { " • $it" } ?: when (state.inPopulatedArea) {
             true -> " • KHU DÂN CƯ"
             false -> " • NGOÀI KHU DÂN CƯ"
             null -> ""
         }
-        signButton.text = "◆  BIỂN BÁO AI: BẬT$suffix"
+        val memorySuffix = if (remembered) " • ĐÃ NHỚ" else ""
+        signButton.text = "◆  BIỂN BÁO AI: BẬT$suffix$memorySuffix"
         signButton.alpha = 1f
         signButton.background = rippleBackground(
             fill = Color.argb(220, 20, 76, 52),

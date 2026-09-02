@@ -4,7 +4,7 @@ import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * V14 NEAR-FIRST lane arbitration.
+ * V14.1 NIGHT/NEAR-FIRST lane arbitration.
  *
  * Lane Core remains useful for continuity and long-range road shape, but the lower-image CV marking
  * detector is authoritative when it has real paint evidence. This prevents a neural road-edge/kerb
@@ -16,7 +16,8 @@ class LaneHybridFusion {
 
     fun update(core: LaneState?, cv: LaneState, timestampNs: Long): LaneState {
         val coreUsable = core?.takeIf { it.left != null && it.right != null && it.confidence >= 0.20f }
-        val cvUsable = cv.takeIf { it.left != null && it.right != null && it.confidence >= 0.12f }
+        val cvMinConfidence = if (cv.nightEnhanced) 0.08f else 0.12f
+        val cvUsable = cv.takeIf { it.left != null && it.right != null && it.confidence >= cvMinConfidence }
 
         val chosen = when {
             coreUsable != null && cvUsable != null -> fuseOrChoose(coreUsable, cvUsable)
@@ -46,8 +47,9 @@ class LaneHybridFusion {
         }
 
         val held = lastGood
-        if (held != null && timestampNs - lastGoodNs <= HOLD_NS) {
-            val age = (timestampNs - lastGoodNs).coerceAtLeast(0L).toFloat() / HOLD_NS
+        val holdNs = if (held?.nightEnhanced == true || cv.nightEnhanced) NIGHT_HOLD_NS else HOLD_NS
+        if (held != null && timestampNs - lastGoodNs <= holdNs) {
+            val age = (timestampNs - lastGoodNs).coerceAtLeast(0L).toFloat() / holdNs
             return held.copy(
                 confidence = (held.confidence * (1f - 0.80f * age)).coerceAtMost(0.24f),
                 departureLevel = LaneDepartureLevel.CENTERED,
@@ -56,7 +58,15 @@ class LaneHybridFusion {
                 isEstimated = true,
             )
         }
-        return LaneState(null, null, 0f, 0f, LaneDepartureLevel.UNAVAILABLE, null)
+        return LaneState(
+            left = null,
+            right = null,
+            confidence = 0f,
+            vehicleOffsetFraction = 0f,
+            departureLevel = LaneDepartureLevel.UNAVAILABLE,
+            departureSide = null,
+            nightEnhanced = cv.nightEnhanced,
+        )
     }
 
     private fun stabilizeAgainstLast(candidate: LaneState, timestampNs: Long): LaneState {
@@ -69,6 +79,8 @@ class LaneHybridFusion {
 
         val disagreement = geometryDisagreement(previous, candidate)
         val alpha = when {
+            candidate.nightEnhanced && candidate.source == LaneSource.CV_FALLBACK &&
+                !candidate.isEstimated && candidate.confidence >= 0.28f -> 0.52f
             candidate.source == LaneSource.CV_FALLBACK && !candidate.isEstimated && candidate.confidence >= 0.45f -> 0.58f
             candidate.isEstimated -> 0.12f
             disagreement >= 0.18f && candidate.confidence < 0.72f -> 0.14f
@@ -113,6 +125,18 @@ class LaneHybridFusion {
         val disagreement = geometryDisagreement(core, cv)
         val nearDisagreement = nearGeometryDisagreement(core, cv)
 
+        // At night, reflective near-road paint is more trustworthy than a broad neural road-edge
+        // hypothesis. Let a modest but geometrically coherent CV lane override the core when they
+        // strongly disagree near the vehicle.
+        if (cv.nightEnhanced && !cv.isEstimated && cv.confidence >= 0.14f &&
+            nearDisagreement >= NIGHT_NEAR_CV_OVERRIDE_DISAGREEMENT
+        ) {
+            return cv.copy(
+                confidence = (cv.confidence * 1.06f).coerceIn(0f, 1f),
+                source = LaneSource.CV_FALLBACK,
+            )
+        }
+
         if (!cv.isEstimated && cv.confidence >= 0.22f && nearDisagreement >= NEAR_CV_OVERRIDE_DISAGREEMENT) {
             return cv.copy(
                 confidence = (cv.confidence * 1.05f).coerceIn(0f, 1f),
@@ -123,7 +147,8 @@ class LaneHybridFusion {
 
         if (disagreement <= MAX_BLEND_DISAGREEMENT) {
             val coreW = (core.confidence + 0.04f).coerceAtLeast(0.10f)
-            val cvW = (cv.confidence + 0.18f).coerceAtLeast(0.14f)
+            val cvW = (cv.confidence + if (cv.nightEnhanced) 0.28f else 0.18f)
+                .coerceAtLeast(if (cv.nightEnhanced) 0.18f else 0.14f)
             val sum = coreW + cvW
             val cw = coreW / sum
             val vw = cvW / sum
@@ -155,12 +180,16 @@ class LaneHybridFusion {
                 source = if (cv.confidence + 0.08f >= core.confidence) LaneSource.CV_FALLBACK else LaneSource.LANE_CORE,
                 modelLatencyMs = core.modelLatencyMs,
                 isEstimated = core.isEstimated || cv.isEstimated,
+                nightEnhanced = cv.nightEnhanced || core.nightEnhanced,
             )
         }
 
         return when {
+            cv.nightEnhanced && !cv.isEstimated && cv.confidence >= 0.14f -> cv
             !cv.isEstimated && cv.confidence >= 0.22f -> cv
-            core.confidence >= cv.confidence * 1.18f -> core
+            core.confidence >= cv.confidence * 1.18f -> core.copy(
+                nightEnhanced = cv.nightEnhanced || core.nightEnhanced,
+            )
             else -> cv
         }
     }
@@ -204,8 +233,10 @@ class LaneHybridFusion {
 
     private companion object {
         const val HOLD_NS = 900_000_000L
+        const val NIGHT_HOLD_NS = 1_250_000_000L
         const val STABILIZE_MAX_AGE_NS = 800_000_000L
         const val MAX_BLEND_DISAGREEMENT = 0.105f
         const val NEAR_CV_OVERRIDE_DISAGREEMENT = 0.085f
+        const val NIGHT_NEAR_CV_OVERRIDE_DISAGREEMENT = 0.070f
     }
 }

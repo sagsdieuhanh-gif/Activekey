@@ -70,9 +70,35 @@ class RoadSenseEngine private constructor(
             }
             if (bestSourceClass < 0) continue
             val classThreshold = when (bestSourceClass) {
-                2, 5, 7 -> (threshold * 0.72f).coerceAtLeast(0.085f) // front four-wheel vehicles: keep small/far boxes
-                3 -> (threshold * 1.20f).coerceAtLeast(0.15f)       // motorcycle: reduce side clutter
-                1 -> (threshold * 1.30f).coerceAtLeast(0.16f)       // bicycle
+                2, 5, 7 -> {
+                    // V14.1: night + centre-focus gets a lower four-wheel floor so small rear
+                    // silhouettes/taillight-lit cars are not discarded before temporal tracking.
+                    val floor = when {
+                        frame.nightMode && frame.longRangeFront -> 0.052f
+                        frame.nightMode -> 0.066f
+                        frame.longRangeFront -> 0.074f
+                        else -> 0.085f
+                    }
+                    val scale = if (frame.nightMode) 0.60f else 0.72f
+                    (threshold * scale).coerceAtLeast(floor)
+                }
+                3 -> {
+                    val floor = when {
+                        frame.nightMode && frame.longRangeFront -> 0.105f
+                        frame.nightMode -> 0.125f
+                        else -> 0.15f
+                    }
+                    (threshold * if (frame.nightMode) 1.05f else 1.20f).coerceAtLeast(floor)
+                }
+                1 -> {
+                    val floor = if (frame.nightMode && frame.longRangeFront) 0.115f else if (frame.nightMode) 0.135f else 0.16f
+                    (threshold * if (frame.nightMode) 1.10f else 1.30f).coerceAtLeast(floor)
+                }
+                0 -> {
+                    // Keep people stricter at night; they should only reach the HUD if the
+                    // centre-path pedestrian gate later confirms an actual crossing risk.
+                    (threshold * if (frame.nightMode) 1.22f else 1.0f).coerceAtLeast(if (frame.nightMode) 0.105f else threshold)
+                }
                 else -> threshold
             }
             if (bestScore < classThreshold) continue

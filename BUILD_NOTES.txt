@@ -1,30 +1,16 @@
-TRUNGKIEN V14.0.0 CENTER-FIRST ADAS
-Android API 36 / JDK 17 / Gradle 9.5.0
-Artifact: TRUNGKIEN-V14-debug-apk
+TRUNGKIEN V14.1.0 NIGHT/CENTER ADAS
+versionCode: 1410
+Artifact: TRUNGKIEN-V14.1-debug-apk
+compileSdk/targetSdk: 36
+Java: 17
+Gradle GitHub: 9.5.0
 
-V14 trọng tâm:
-- LANE NEAR-FIRST / PAINT-FIRST.
-- CENTER-FIRST / LEAD-FIRST.
-- Side traffic chỉ hiện khi cut-in.
-- Pedestrian ngoài ego-path bị giảm mạnh.
-- V13.2 rollback commit: 03277564eeccbcbdd467534ebffa0583d7f54ce8.
-
-TRUNGKIEN V13.2.0
-Android API 36 / JDK 17 / Gradle 9.5.0
-Artifact: TRUNGKIEN-V13.2-debug-apk
-
-TRUNGKIEN V13.0.0 — ADAS LEAD-LANE
-TRUNGKIEN V12.0.0 R2 BUILD NOTES
-
-- versionCode 1201 / versionName 12.0.0.
-- Giữ tên phát hành V12 theo yêu cầu; versionCode tăng để phân biệt/cập nhật bản V12 R2.
-- preBuild phụ thuộc task prepareCorePackages.
-- road_core.dat và lane_core.dat được verify trước khi bundle vào APK.
-- Runtime không tự tải hai core package.
-- OCR biển báo dùng `com.google.mlkit:text-recognition:16.0.1` dạng bundled và chỉ được khởi tạo khi BIỂN BÁO AI bật.
-- FRONT FIRST / LONG RANGE 100m / LANE HYBRID / Hood Guard / Auto Range / Thermal Guard / trial 5 phút + license đã được tích hợp.
-- Tư vấn cự ly theo GPS dùng biên sai số một phía bảo thủ; không xác nhận SAFE chỉ từ point estimate.
-- Không vẽ CHÂN TRỜI AUTO trên giao diện; road-plane/camera geometry nội bộ vẫn phục vụ tính toán.
-- Private admin signing key KHÔNG được đưa vào APK hoặc ZIP source công khai. Dùng gói admin private tách riêng.
-- Release build bật minify + shrinkResources; debug build không minify để dễ debug.
-- Đổi tên lõi trong UI/log chỉ giảm nhận diện thông thường, không phải anti-reverse-engineering tuyệt đối.
+Trọng tâm:
+- NIGHT AUTO phát hiện bằng mean luma + dark ratio.
+- Lane local-contrast reflective-paint, near-first 50–96.5%.
+- Center-focus Road Core khi đêm/lane yếu.
+- Lead không phụ thuộc lane lock.
+- Central four-wheel night confirmation nhanh hơn.
+- Xe/người hai bên vẫn giảm ưu tiên; Side Guard chỉ nổi khi cut-in.
+- V12/V13/V14/V14.1 dùng chung hệ license hiện tại.
+- Không chứa Admin private key.

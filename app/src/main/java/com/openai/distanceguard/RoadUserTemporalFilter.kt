@@ -7,7 +7,7 @@ import kotlin.math.max
 /**
  * Lightweight driving-oriented multi-object tracker.
  *
- * V13.2 keeps identity through brief detector drop-outs/partial occlusion using constant-velocity
+ * V14.1 keeps identity through brief detector drop-outs/partial occlusion using constant-velocity
  * prediction and an adaptive association gate. Mature tracks are allowed to reacquire with slightly
  * lower IoU when their predicted centre/scale remain plausible; brand-new weak boxes still need
  * several hits before they are exposed to lead/cut-in selection.
@@ -173,8 +173,14 @@ class RoadUserTemporalFilter {
         val area = d.width * d.height
         val farTiny = area < 0.0045f
         val small = area < 0.010f
+        val fourWheel = d.classId in FOUR_WHEEL_CLASSES
+        val centered = d.centerX in 0.33f..0.67f && d.bottom >= 0.28f
         val requiredHits = when {
-            farTiny && d.classId in FOUR_WHEEL_CLASSES -> if (nightMode) 4 else 3
+            // Centre-first night fallback: a plausible car directly ahead should become available
+            // after 2-3 detector observations instead of waiting four weak night frames.
+            nightMode && fourWheel && centered && !farTiny -> 2
+            nightMode && fourWheel && centered && farTiny -> 3
+            farTiny && fourWheel -> if (nightMode) 4 else 3
             nightMode && (small || d.score < 0.18f) -> 3
             small || d.score < 0.24f -> 2
             else -> 1
@@ -190,9 +196,14 @@ class RoadUserTemporalFilter {
             else -> 0.25f
         }
         val smallPenalty = if (raw.width * raw.height < 0.0045f) 0.02f else 0f
-        val nightPenalty = if (nightMode && !track.mature) 0.015f else 0f
+        // Night boxes jitter more. Slightly relax association instead of making it stricter, while
+        // temporal output confirmation still blocks one-frame false positives.
+        val nightAdjustment = if (nightMode) {
+            if (track.mature) -0.025f else -0.012f
+        } else 0f
         // ageSinceSeen is normally zero for matched updates; retained for future timing diagnostics.
-        return (base + smallPenalty + nightPenalty + if (ageSinceSeen > 500_000_000L) 0.01f else 0f).coerceIn(0.16f, 0.32f)
+        return (base + smallPenalty + nightAdjustment + if (ageSinceSeen > 500_000_000L) 0.01f else 0f)
+            .coerceIn(0.15f, 0.32f)
     }
 
     private fun holdWindow(track: Track, nightMode: Boolean): Long {
@@ -244,6 +255,6 @@ class RoadUserTemporalFilter {
         private val FOUR_WHEEL_CLASSES = setOf(VehicleClasses.CAR, VehicleClasses.BUS, VehicleClasses.TRUCK)
         private const val TRACK_TTL_NS = 2_050_000_000L
         private const val DAY_HOLD_NS = 680_000_000L
-        private const val NIGHT_HOLD_NS = 880_000_000L
+        private const val NIGHT_HOLD_NS = 1_050_000_000L
     }
 }

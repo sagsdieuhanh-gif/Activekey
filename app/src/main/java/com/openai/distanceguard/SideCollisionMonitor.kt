@@ -31,7 +31,7 @@ data class SideCollisionHazard(
 )
 
 /**
- * V14 low-priority side guard + cut-in predictor for a forward phone camera.
+ * V14.1 low-priority side guard + cut-in predictor for a forward phone camera.
  *
  * Every adjacent vehicle keeps its own tracker ID and lane-relative lateral history. Measuring motion
  * relative to the detected lane (instead of raw screen X) automatically removes much of the apparent
@@ -84,7 +84,7 @@ class SideCollisionMonitor(
             updateTrack(candidate, track, timestampNs, egoSpeedMps)?.let(hazards::add)
         }
 
-        // V14 keeps only one meaningful threat per side. Normal adjacent traffic remains tracked
+        // V14.1 keeps only one meaningful threat per side. Normal adjacent traffic remains tracked
         // internally but is intentionally absent from the HUD until an inward trend is established.
         return hazards
             .groupBy { it.side }
