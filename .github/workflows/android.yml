@@ -1,4 +1,4 @@
-name: TRUNGKIEN V15.2 Slim ARM64 Dedicated Lane Build
+name: TRUNGKIEN V15.2.1 Lane Core Runtime Hotfix
 
 on:
   workflow_dispatch:
@@ -20,7 +20,7 @@ jobs:
           gradle-version: '9.5.0'
       - name: Install Android SDK packages
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-      - name: Stage V15.2 SAME FP32 UFLD CULane model
+      - name: Stage V15.2.1 exact FP32 UFLD CULane model
         shell: bash
         run: |
           set -euo pipefail
@@ -29,18 +29,28 @@ jobs:
             "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/140_Ultra-Fast-Lane-Detection/resources_culane.tar.gz" \
             -o /tmp/ufld.tar.gz
           tar -xzf /tmp/ufld.tar.gz -C /tmp/ufld
-          MODEL="$(find /tmp/ufld -type f -name '*.onnx' | grep -Ei 'culane|288|800' | grep -Evi 'int8|uint8|fp16|float16' | head -n 1 || true)"
-          if [ -z "$MODEL" ]; then MODEL="$(find /tmp/ufld -type f -name '*.onnx' | head -n 1)"; fi
-          test -n "$MODEL"
+          MODEL="/tmp/ufld/saved_model_culane/ultra_falst_lane_detection_culane_288x800.onnx"
+          test -f "$MODEL"
           cp "$MODEL" app/offline_models/lane_core.dat
-          echo "Dedicated lane model: $MODEL ($(du -h app/offline_models/lane_core.dat | cut -f1))"
-      - name: Build V15.2 slim ARM64 APK
+
+          test "$(stat -c%s app/offline_models/lane_core.dat)" = "178076232"
+          echo "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  app/offline_models/lane_core.dat" | sha256sum -c -
+
+          echo "Dedicated lane model VERIFIED: $MODEL ($(du -h app/offline_models/lane_core.dat | cut -f1))"
+      - name: Build V15.2.1 ARM64 APK
         run: gradle --no-daemon clean assembleDebug
-      - name: Report APK size
+      - name: Verify Lane Core inside APK
         run: |
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
-          echo "Lane Core remains the SAME full-precision FP32 model."
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          ls -lh "$APK"
+
+          unzip -p "$APK" assets/lane_core.dat > /tmp/lane_core_from_apk.dat
+          test "$(stat -c%s /tmp/lane_core_from_apk.dat)" = "178076232"
+          echo "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  /tmp/lane_core_from_apk.dat" | sha256sum -c -
+
+          echo "PASS: exact FP32 Lane Core is physically inside the APK."
       - uses: actions/upload-artifact@v4
         with:
-          name: TRUNGKIEN-V15.2-slim-arm64-apk
+          name: TRUNGKIEN-V15.2.1-lane-core-hotfix-apk
           path: app/build/outputs/apk/debug/app-debug.apk

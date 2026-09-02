@@ -25,8 +25,8 @@ android {
         }
         // V14.1 NIGHT/CENTER FIX: automatic low-light enhancement, night lane near-first,
         // centre-fallback lead acquisition, low-noise side cut-in watch and licensed access.
-        versionCode = 1520
-        versionName = "15.2.0"
+        versionCode = 1521
+        versionName = "15.2.1"
     }
 
     buildTypes {
@@ -92,20 +92,6 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
             return md.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
         }
 
-        fun gitBlobSha1(file: File): String {
-            val md = MessageDigest.getInstance("SHA-1")
-            md.update("blob ${file.length()}\u0000".toByteArray(Charsets.UTF_8))
-            file.inputStream().use { input ->
-                val buffer = ByteArray(256 * 1024)
-                while (true) {
-                    val n = input.read(buffer)
-                    if (n <= 0) break
-                    md.update(buffer, 0, n)
-                }
-            }
-            return md.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
-        }
-
         fun reveal(encoded: String): String = String(Base64.getDecoder().decode(encoded), Charsets.UTF_8)
 
         fun download(url: String, target: File) {
@@ -115,7 +101,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
                 connectTimeout = 30_000
                 readTimeout = 120_000
                 instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "TRUNGKIEN-V15.2-Slim-Build/15.2.0")
+                setRequestProperty("User-Agent", "TRUNGKIEN-V15.2.1-LaneHotfix/15.2.1")
                 setRequestProperty("Accept", "application/octet-stream")
             }
             try {
@@ -139,7 +125,12 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
         val visionExpectedSha = "c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063"
         fun visionValid(file: File) = file.exists() && file.length() == visionExpectedSize && sha256(file) == visionExpectedSha
 
-        fun laneValid(file: File) = file.exists() && file.length() > 1_000_000L
+        val laneExpectedSize = 178_076_232L
+        val laneExpectedSha = "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491"
+        fun laneValid(file: File) =
+            file.exists() &&
+                file.length() == laneExpectedSize &&
+                sha256(file) == laneExpectedSha
 
         val manualVision = manualAssets.resolve("road_core.dat")
         if (!visionValid(visionOut)) {
@@ -147,7 +138,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
             if (visionValid(manualVision)) {
                 manualVision.copyTo(visionOut, overwrite = true)
             } else {
-                logger.lifecycle("TRUNGKIEN V15.2: preparing Road Core package...")
+                logger.lifecycle("TRUNGKIEN V15.2.1: preparing Road Core package...")
                 download(
                     reveal("aHR0cHM6Ly9naXRodWIuY29tL01lZ3ZpaS1CYXNlRGV0ZWN0aW9uL1lPTE9YL3JlbGVhc2VzL2Rvd25sb2FkLzAuMS4xcmMwL3lvbG94X3Mub25ueA=="),
                     visionOut,
@@ -160,7 +151,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
                 "Road Core package invalid. Place the verified package at app/offline_models/road_core.dat and rebuild."
             )
         }
-        logger.lifecycle("TRUNGKIEN V15.2: Road Core ready (${visionOut.length()} bytes).")
+        logger.lifecycle("TRUNGKIEN V15.2.1: Road Core ready (${visionOut.length()} bytes).")
 
         val manualLane = manualAssets.resolve("lane_core.dat")
         if (!laneValid(laneOut)) {
@@ -179,8 +170,8 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
                 "Lane Core package invalid. Place the verified package at app/offline_models/lane_core.dat and rebuild."
             )
         }
-        logger.lifecycle("TRUNGKIEN V15.2: Lane Core ready (${laneOut.length() / 1024 / 1024} MiB).")
-        logger.lifecycle("TRUNGKIEN V15.2: core packages will be bundled into the APK; runtime download is disabled.")
+        logger.lifecycle("TRUNGKIEN V15.2.1: Lane Core ready (${laneOut.length() / 1024 / 1024} MiB).")
+        logger.lifecycle("TRUNGKIEN V15.2.1: core packages will be bundled into the APK; runtime download is disabled.")
     }
 }
 
