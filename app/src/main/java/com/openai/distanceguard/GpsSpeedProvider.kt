@@ -160,6 +160,7 @@ class GpsSpeedProvider(
 
     private fun publish(value: GpsSpeedSnapshot) {
         state = value
+        GpsRiskContext.update(value)
         onState(value)
     }
 

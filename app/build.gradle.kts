@@ -18,10 +18,15 @@ android {
         applicationId = "com.trungkien.distanceguard.v1tracking"
         minSdk = 24
         targetSdk = 36
+        // V15.2 SLIM: target modern 64-bit Android phones only.
+        // This does NOT change either AI model or lane accuracy.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
         // V14.1 NIGHT/CENTER FIX: automatic low-light enhancement, night lane near-first,
         // centre-fallback lead acquisition, low-noise side cut-in watch and licensed access.
-        versionCode = 1510
-        versionName = "15.1.0"
+        versionCode = 1520
+        versionName = "15.2.0"
     }
 
     buildTypes {
@@ -62,8 +67,6 @@ dependencies {
 
     // Shared on-device inference runtime for both internal core packages.
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
-    // Bundled on-device OCR used only when the user enables BIỂN BÁO AI.
-    implementation("com.google.mlkit:text-recognition:16.0.1")
 }
 
 val prepareCorePackages = tasks.register("prepareCorePackages") {
@@ -112,7 +115,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
                 connectTimeout = 30_000
                 readTimeout = 120_000
                 instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "TRUNGKIEN-V14.1-Core-Build/14.1.0")
+                setRequestProperty("User-Agent", "TRUNGKIEN-V15.2-Slim-Build/15.2.0")
                 setRequestProperty("Accept", "application/octet-stream")
             }
             try {
@@ -144,7 +147,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
             if (visionValid(manualVision)) {
                 manualVision.copyTo(visionOut, overwrite = true)
             } else {
-                logger.lifecycle("TRUNGKIEN V15.1: preparing Road Core package...")
+                logger.lifecycle("TRUNGKIEN V15.2: preparing Road Core package...")
                 download(
                     reveal("aHR0cHM6Ly9naXRodWIuY29tL01lZ3ZpaS1CYXNlRGV0ZWN0aW9uL1lPTE9YL3JlbGVhc2VzL2Rvd25sb2FkLzAuMS4xcmMwL3lvbG94X3Mub25ueA=="),
                     visionOut,
@@ -157,7 +160,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
                 "Road Core package invalid. Place the verified package at app/offline_models/road_core.dat and rebuild."
             )
         }
-        logger.lifecycle("TRUNGKIEN V15.1: Road Core ready (${visionOut.length()} bytes).")
+        logger.lifecycle("TRUNGKIEN V15.2: Road Core ready (${visionOut.length()} bytes).")
 
         val manualLane = manualAssets.resolve("lane_core.dat")
         if (!laneValid(laneOut)) {
@@ -176,8 +179,8 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
                 "Lane Core package invalid. Place the verified package at app/offline_models/lane_core.dat and rebuild."
             )
         }
-        logger.lifecycle("TRUNGKIEN V15.1: Lane Core ready (${laneOut.length() / 1024 / 1024} MiB).")
-        logger.lifecycle("TRUNGKIEN V15.1: core packages will be bundled into the APK; runtime download is disabled.")
+        logger.lifecycle("TRUNGKIEN V15.2: Lane Core ready (${laneOut.length() / 1024 / 1024} MiB).")
+        logger.lifecycle("TRUNGKIEN V15.2: core packages will be bundled into the APK; runtime download is disabled.")
     }
 }
 

@@ -1,7 +1,42 @@
 package com.openai.distanceguard
 
+import android.os.SystemClock
 import kotlin.math.max
 import kotlin.math.min
+
+/** Latest GNSS speed uncertainty used only for conservative risk math. */
+object GpsRiskContext {
+    @Volatile private var speedMps: Float? = null
+    @Volatile private var accuracyMps: Float? = null
+    @Volatile private var updatedElapsedMs: Long = 0L
+
+    fun update(snapshot: GpsSpeedSnapshot) {
+        if (snapshot.status == GpsStatus.OK) {
+            speedMps = snapshot.speedMps
+            accuracyMps = snapshot.speedAccuracyMps?.takeIf { it.isFinite() && it >= 0f }
+            updatedElapsedMs = snapshot.updatedElapsedMs
+        } else {
+            speedMps = null
+            accuracyMps = null
+            updatedElapsedMs = 0L
+        }
+    }
+
+    fun reportedAccuracyMps(nowMs: Long = SystemClock.elapsedRealtime()): Float {
+        if (updatedElapsedMs <= 0L || nowMs - updatedElapsedMs > 3_500L) return 0f
+        return (accuracyMps ?: 0f).coerceIn(0f, 4.5f)
+    }
+
+    fun conservativeSpeedMps(rawSpeedMps: Float?, nowMs: Long = SystemClock.elapsedRealtime()): Float? {
+        val raw = rawSpeedMps ?: return null
+        return (raw + reportedAccuracyMps(nowMs)).coerceAtLeast(0f)
+    }
+
+    fun latestConservativeSpeedMps(nowMs: Long = SystemClock.elapsedRealtime()): Float? {
+        if (updatedElapsedMs <= 0L || nowMs - updatedElapsedMs > 3_500L) return null
+        return conservativeSpeedMps(speedMps, nowMs)
+    }
+}
 
 /** Coordinates are normalized to the rotated analysis image, in [0, 1]. */
 data class Detection(
@@ -81,22 +116,37 @@ data class GpsSpeedSnapshot(
 }
 
 data class DrivingMetrics(
+    /** Filtered GPS speed shown to the driver; never inflated for display. */
     val egoSpeedMps: Float?,
+    /** Conservative gap: distance / (GPS speed + reported GPS speed uncertainty). */
     val timeGapSeconds: Float,
+    /** Conservative two-second distance using the same uncertainty margin. */
     val recommendedTwoSecondDistanceM: Float?,
+    /** Internal-only speed used by risk thresholds. */
+    val riskSpeedMps: Float? = egoSpeedMps,
+    val gpsSpeedAccuracyMps: Float = 0f,
 ) {
     companion object {
         fun from(track: TrackState?, gpsSpeedMps: Float?): DrivingMetrics {
+            val accuracy = GpsRiskContext.reportedAccuracyMps()
+            val riskSpeed = GpsRiskContext.conservativeSpeedMps(gpsSpeedMps)
             if (track == null || gpsSpeedMps == null) {
-                return DrivingMetrics(gpsSpeedMps, Float.POSITIVE_INFINITY, gpsSpeedMps?.times(2f))
+                return DrivingMetrics(
+                    egoSpeedMps = gpsSpeedMps,
+                    timeGapSeconds = Float.POSITIVE_INFINITY,
+                    recommendedTwoSecondDistanceM = riskSpeed?.times(2f),
+                    riskSpeedMps = riskSpeed,
+                    gpsSpeedAccuracyMps = accuracy,
+                )
             }
-            // Below ~5 km/h, time-gap is not a useful following-distance metric.
-            val speedForGap = gpsSpeedMps.takeIf { it >= 1.4f }
+            val speedForGap = riskSpeed?.takeIf { it >= 1.4f }
             val gap = speedForGap?.let { track.distanceM / it } ?: Float.POSITIVE_INFINITY
             return DrivingMetrics(
                 egoSpeedMps = gpsSpeedMps,
                 timeGapSeconds = gap,
-                recommendedTwoSecondDistanceM = gpsSpeedMps * 2f,
+                recommendedTwoSecondDistanceM = riskSpeed?.times(2f),
+                riskSpeedMps = riskSpeed,
+                gpsSpeedAccuracyMps = accuracy,
             )
         }
     }
@@ -119,7 +169,8 @@ enum class RiskLevel {
             val d = track.distanceM
             val ttc = track.ttcSeconds
             val gap = metrics.timeGapSeconds
-            val speed = metrics.egoSpeedMps
+            // Use GPS + Android-reported speed uncertainty for conservative risk only.
+            val speed = metrics.riskSpeedMps ?: metrics.egoSpeedMps
 
             return if (speed != null) {
                 when {

@@ -175,11 +175,53 @@ class DetectionOverlayView @JvmOverloads constructor(
         if (width <= 0 || height <= 0) return
 
         drawLane(canvas)
-        drawSideHazards(canvas)
-        drawRelevantPedestrian(canvas)
+        drawInLaneObjects(canvas)
         drawLead(canvas)
         if (hoodEditMode) drawHoodEditor(canvas)
         if (debugEnabled) drawDebugPanel(canvas)
+    }
+
+    private fun drawInLaneObjects(canvas: Canvas) {
+        val lane = laneState.takeIf {
+            it.left != null && it.right != null &&
+                it.confidence >= 0.35f &&
+                it.departureLevel != LaneDepartureLevel.UNAVAILABLE
+        } ?: return
+
+        val selected = target?.detection
+        for (d in detections) {
+            if (d.predicted) continue
+            if (selected != null) {
+                val sameTrack = d.trackId > 0 && selected.trackId > 0 && d.trackId == selected.trackId
+                val sameBox = d.iou(selected) >= 0.70f
+                if (sameTrack || sameBox) continue
+            }
+
+            val y = d.bottom.coerceIn(0.50f, 0.97f)
+            val bounds = lane.boundsAt(y) ?: continue
+            val laneWidth = (bounds.second - bounds.first).coerceAtLeast(0.06f)
+            val inset = (laneWidth * 0.04f).coerceIn(0.008f, 0.030f)
+            if (d.centerX < bounds.first + inset || d.centerX > bounds.second - inset) continue
+
+            val rect = mapRect(d)
+            if (rect.width() < dp(4f) || rect.height() < dp(4f)) continue
+            val color = when (d.classId) {
+                VehicleClasses.PERSON -> AMBER
+                VehicleClasses.BICYCLE, VehicleClasses.MOTORCYCLE -> CYAN
+                else -> CYAN
+            }
+            targetPaint.color = color
+            targetPaint.strokeWidth = dp(2.0f)
+            drawVehicleBracket(canvas, rect, targetPaint)
+
+            smallTextPaint.color = color
+            canvas.drawText(
+                VehicleClasses.label(d.classId),
+                rect.centerX(),
+                (rect.bottom + dp(14f)).coerceAtMost(height - dp(5f)),
+                smallTextPaint,
+            )
+        }
     }
 
     private fun drawLead(canvas: Canvas) {
@@ -195,6 +237,29 @@ class DetectionOverlayView @JvmOverloads constructor(
         val distanceM = track?.distanceM ?: target?.correctedDistanceM ?: return
         val distanceText = formatAdasDistance(distanceM, rangeQuality)
         drawDistanceTag(canvas, rect.centerX(), rect.top - dp(10f), distanceText, color, large = true)
+
+        val riskSpeed = GpsRiskContext.latestConservativeSpeedMps()
+        val gapSeconds = riskSpeed?.takeIf { it >= 1.4f }?.let { distanceM / it }
+        val ttcSeconds = track?.ttcSeconds?.takeIf {
+            it.isFinite() && it > 0f && (track?.closingSpeedMps ?: 0f) > 0.45f
+        }
+        val detail = buildList {
+            gapSeconds?.takeIf { it.isFinite() && it < 20f }?.let {
+                add("GAP " + String.format(Locale.US, "%.1fs", it))
+            }
+            ttcSeconds?.takeIf { it < 20f }?.let {
+                add("TTC " + String.format(Locale.US, "%.1fs", it))
+            }
+        }.joinToString(" • ")
+        if (detail.isNotEmpty()) {
+            smallTextPaint.color = color
+            canvas.drawText(
+                detail,
+                rect.centerX(),
+                (rect.bottom + dp(16f)).coerceAtMost(height - dp(6f)),
+                smallTextPaint,
+            )
+        }
     }
 
     private fun drawRelevantPedestrian(canvas: Canvas) {
