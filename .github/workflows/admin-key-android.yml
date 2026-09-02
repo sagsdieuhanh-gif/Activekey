@@ -1,0 +1,32 @@
+name: TRUNGKIEN Admin Key Android Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'admin-key-android/**'
+      - '.github/workflows/admin-key-android.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Install Android SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - name: Build Admin Key APK
+        working-directory: admin-key-android
+        run: gradle --no-daemon clean assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TRUNGKIEN-ADMIN-KEY-APK
+          path: admin-key-android/app/build/outputs/apk/debug/app-debug.apk
