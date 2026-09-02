@@ -1,6 +1,0 @@
-TRUNGKIEN V13.2.0 FULL ADAS
-
-Mở thư mục gốc project (thư mục chứa settings.gradle.kts) trong Android Studio.
-Project build target: compileSdk/targetSdk 36, JDK 17.
-Model core được task Gradle prepareCorePackages tải/xác minh và đóng vào APK khi build.
-Không đặt private key Admin vào project này.
