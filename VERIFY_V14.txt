@@ -1,0 +1,14 @@
+TRUNGKIEN V14.0.0 — QUICK VERIFY
+
+1. versionName 14.0.0 / versionCode 1400.
+2. Workflow artifact: TRUNGKIEN-V14-debug-apk.
+3. Lane: near-road white/yellow marking should beat curb/barrier.
+4. Clear lower lane marking should pull corridor back even if Lane Core disagrees.
+5. Center car/vehicle should beat side motorcycle with higher detector confidence.
+6. Parallel side traffic should not be drawn.
+7. Side traffic appears only when WATCH/PREDICTED/IMMINENT cut-in evidence exists.
+8. Pedestrians on sidewalk/shoulder should not own the main HUD.
+9. Pedestrian in central ego path remains warnable.
+10. Hood exclusion, 0–100m range, TTS, Thermal Guard, Sign AI remain.
+11. License remains compatible with V12/V13 Admin app.
+12. No private key in user source/APK.

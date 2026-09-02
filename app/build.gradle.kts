@@ -18,9 +18,9 @@ android {
         applicationId = "com.trungkien.distanceguard.v1tracking"
         minSdk = 24
         targetSdk = 36
-        // V13 ADAS: lane corridor, lead-first selection, cut-in prediction, long-range range fusion, thermal guard and licensed access.
-        versionCode = 1320
-        versionName = "13.2.0"
+        // V14 CENTER-FIRST: near-road lane marking priority, central lead focus, low-noise side cut-in watch, long-range fusion and licensed access.
+        versionCode = 1400
+        versionName = "14.0.0"
     }
 
     buildTypes {
@@ -111,7 +111,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
                 connectTimeout = 30_000
                 readTimeout = 120_000
                 instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "TRUNGKIEN-V13-Core-Build/13.2.0")
+                setRequestProperty("User-Agent", "TRUNGKIEN-V14-Core-Build/14.0.0")
                 setRequestProperty("Accept", "application/octet-stream")
             }
             try {
@@ -144,7 +144,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
             if (visionValid(manualVision)) {
                 manualVision.copyTo(visionOut, overwrite = true)
             } else {
-                logger.lifecycle("TRUNGKIEN V13: preparing Road Core package...")
+                logger.lifecycle("TRUNGKIEN V14: preparing Road Core package...")
                 download(
                     reveal("aHR0cHM6Ly9naXRodWIuY29tL01lZ3ZpaS1CYXNlRGV0ZWN0aW9uL1lPTE9YL3JlbGVhc2VzL2Rvd25sb2FkLzAuMS4xcmMwL3lvbG94X3Mub25ueA=="),
                     visionOut,
@@ -157,7 +157,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
                 "Road Core package invalid. Place the verified package at app/offline_models/road_core.dat and rebuild."
             )
         }
-        logger.lifecycle("TRUNGKIEN V13: Road Core ready (${visionOut.length()} bytes).")
+        logger.lifecycle("TRUNGKIEN V14: Road Core ready (${visionOut.length()} bytes).")
 
         val manualLane = manualAssets.resolve("lane_core.dat")
         if (!laneValid(laneOut)) {
@@ -165,7 +165,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
             if (laneValid(manualLane)) {
                 manualLane.copyTo(laneOut, overwrite = true)
             } else {
-                logger.lifecycle("TRUNGKIEN V13: preparing Lane Core package...")
+                logger.lifecycle("TRUNGKIEN V14: preparing Lane Core package...")
                 download(
                     reveal("aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL01UYW1tdmVlL29wZW5waWxvdC1zdXBlcmNvbWJvLW1vZGVsLzEzNDkwOGU1NTQ5MzAyMDc1MGY4NDk2MTI3YmFmZjVhYjNhMTkyYWQvc3VwZXJjb21iby5vbm54"),
                     laneOut,
@@ -178,8 +178,8 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
                 "Lane Core package invalid. Place the verified package at app/offline_models/lane_core.dat and rebuild."
             )
         }
-        logger.lifecycle("TRUNGKIEN V13: Lane Core ready (${laneOut.length() / 1024 / 1024} MiB).")
-        logger.lifecycle("TRUNGKIEN V13: core packages will be bundled into the APK; runtime download is disabled.")
+        logger.lifecycle("TRUNGKIEN V14: Lane Core ready (${laneOut.length() / 1024 / 1024} MiB).")
+        logger.lifecycle("TRUNGKIEN V14: core packages will be bundled into the APK; runtime download is disabled.")
     }
 }
 

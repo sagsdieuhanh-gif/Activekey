@@ -1,35 +1,30 @@
-# VALIDATION — TRUNGKIEN V13.2.0 FULL
+# VALIDATION — TRUNGKIEN V14.0.0 CENTER-FIRST
 
 ## Static validation trong môi trường đóng gói
-- Pure Kotlin ADAS core compile: PASS
-- Pure smoke test: PASS (lead-first car vs side motorcycle, mature Track ID coast/reacquire, 90 m uncertainty floor, side cut-in trend promotion)
-  - Models / Calibration / DistanceCorrection
-  - FollowingDistanceAdvisor
-  - GroundPlaneDistanceEstimator / TargetSelector
-  - LaneDetector / LaneHybridFusion
-  - RangeFusion / DistanceTracker
-  - SideCollisionMonitor
-  - RoadUserTemporalFilter V13.2
-  - RiskStabilizer / AdasConfidence
-- Android-dependent edited files: syntax parse check, không có `expecting`, `unclosed`, `unexpected tokens`, `missing }`: PASS.
-- Source scan: không có PEM/private key: PASS.
-- Workflow: Android API 36 + JDK 17 + Gradle 9.5.0: configured.
-- Version: 13.2.0 / code 1320.
+- Pure Kotlin core compile: PASS.
+- Synthetic lane test: PASS — central white lane markings win over stronger bright outer road edges.
+- Lead test: PASS — center car remains lead while higher-confidence side motorcycle is ignored.
+- Pedestrian test: PASS — sidewalk pedestrian ignored; center-path pedestrian retained.
+- Side monitor test: PASS — parallel side traffic produces no HUD hazard; inward cut-in is promoted.
+- Termux deployment script syntax: PASS.
+- Source scan: không có PEM/private key trong app/.github: PASS.
+- Workflow: Android API 36 + JDK 17 + Gradle 9.5.0.
+- Version: 14.0.0 / code 1400.
 
-## Behaviour encoded in V13.2
-- Long-range >=60 m cần lead confirmation mạnh hơn và uncertainty floor bảo thủ.
-- >=85 m không được quảng bá HIGH range quality.
-- Lead handover có hysteresis; motorcycle/bicycle lane bên bị penalty mạnh.
-- Tracker coasts/reacquires mature Track ID qua occlusion ngắn.
-- Lane confidence thấp/estimated được render yếu/nét đứt.
-- Cut-in TLC dùng mép vehicle gần lane.
-- Collision risk immediate; lower risk temporal-confirmed.
-- TTS startup warm-up + queue guard + milestone 5/4/3/2/1 m.
-- Thermal 4 mode + battery temperature + stationary low-power.
-- Sign runtime persistence có TTL.
-- Debug logging không chứa camera frame.
+## Behaviour encoded in V14
+- Lane NEAR-FIRST: scan lower road 54–95% image and weight near points more strongly.
+- PAINT-FIRST: white/yellow line evidence > generic gradient/road edge.
+- Narrower search/fallback corridor reduces kerb/barrier locking.
+- CV marking near vehicle can override Lane Core when sources disagree.
+- CENTER-FIRST target score strongly prioritizes centrality + lane overlap.
+- Side motorcycle/bicycle needs deep ego-lane overlap before becoming lead.
+- Lead switch confirmation increased.
+- Pedestrians outside central ego path are suppressed.
+- Side traffic is shown only after inward/cut-in evidence; max one threat each side.
+- V13.2 debug-overlay scope hotfix included.
+- Long range, hood exclusion, TTS, sign AI, thermal and license retained.
 
-## Cần xác nhận trên xe/thực địa
-Không có test bench camera/radar chuẩn trong container. Trước khi coi khoảng cách là đã hiệu chỉnh thực tế, phải test các mốc 5 / 10 / 20 / 30 / 50 / 70 / 100 m với mốc đo độc lập, nhiều loại xe, đường thẳng/cong, ngày/đêm. Long-range 60–100 m phải được xem là approximate.
+## Cần xác nhận thực địa
+Test lane/lead ở đường có vạch liền, vạch đứt, đường cong, đường đô thị có curb rõ, xe máy chạy hai bên và các mốc 5/10/20/30/50/70/100 m. Long-range 60–100 m vẫn là approximate.
 
-Full `assembleDebug` được xác nhận cuối trên GitHub Actions sau khi upload source, vì model AI được tải/bundle trong workflow build.
+Full `assembleDebug` được xác nhận cuối trên GitHub Actions sau khi upload source vì Road Core/Lane Core được tải và bundle trong workflow.

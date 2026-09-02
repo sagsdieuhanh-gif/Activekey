@@ -4,24 +4,28 @@ import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * V13 lane arbitration.
+ * V14 NEAR-FIRST lane arbitration.
  *
- * The neural lane core and the image-space CV detector are independent. When both agree we blend
- * their geometry instead of hard-switching sources frame to frame; when they disagree we keep the
- * stronger source and retain the last credible lane briefly through dashed/washed-out markings.
+ * Lane Core remains useful for continuity and long-range road shape, but the lower-image CV marking
+ * detector is authoritative when it has real paint evidence. This prevents a neural road-edge/kerb
+ * hypothesis from overriding a clear lane marking near the vehicle.
  */
 class LaneHybridFusion {
     private var lastGood: LaneState? = null
     private var lastGoodNs: Long = 0L
 
     fun update(core: LaneState?, cv: LaneState, timestampNs: Long): LaneState {
-        val coreUsable = core?.takeIf { it.left != null && it.right != null && it.confidence >= 0.18f }
-        val cvUsable = cv.takeIf { it.left != null && it.right != null && it.confidence >= 0.14f }
+        val coreUsable = core?.takeIf { it.left != null && it.right != null && it.confidence >= 0.20f }
+        val cvUsable = cv.takeIf { it.left != null && it.right != null && it.confidence >= 0.12f }
 
         val chosen = when {
             coreUsable != null && cvUsable != null -> fuseOrChoose(coreUsable, cvUsable)
-            coreUsable != null -> coreUsable
             cvUsable != null -> cvUsable
+            coreUsable != null -> coreUsable.copy(
+                confidence = (coreUsable.confidence * 0.78f).coerceAtMost(0.58f),
+                source = LaneSource.HYBRID_ESTIMATED,
+                isEstimated = true,
+            )
             else -> null
         }
 
@@ -45,7 +49,7 @@ class LaneHybridFusion {
         if (held != null && timestampNs - lastGoodNs <= HOLD_NS) {
             val age = (timestampNs - lastGoodNs).coerceAtLeast(0L).toFloat() / HOLD_NS
             return held.copy(
-                confidence = (held.confidence * (1f - 0.72f * age)).coerceAtMost(0.27f),
+                confidence = (held.confidence * (1f - 0.80f * age)).coerceAtMost(0.24f),
                 departureLevel = LaneDepartureLevel.CENTERED,
                 departureSide = null,
                 source = LaneSource.HYBRID_ESTIMATED,
@@ -55,11 +59,6 @@ class LaneHybridFusion {
         return LaneState(null, null, 0f, 0f, LaneDepartureLevel.UNAVAILABLE, null)
     }
 
-    /**
-     * Damp geometry changes between consecutive fused lanes. This is deliberately stronger when
-     * the new lane disagrees with the previous one and weaker when a high-confidence real lane
-     * arrives. It prevents a one-frame source handover from visibly swinging the ADAS corridor.
-     */
     private fun stabilizeAgainstLast(candidate: LaneState, timestampNs: Long): LaneState {
         val previous = lastGood ?: return candidate
         if (timestampNs - lastGoodNs > STABILIZE_MAX_AGE_NS) return candidate
@@ -70,12 +69,13 @@ class LaneHybridFusion {
 
         val disagreement = geometryDisagreement(previous, candidate)
         val alpha = when {
-            candidate.isEstimated -> 0.14f
-            disagreement >= 0.18f && candidate.confidence < 0.72f -> 0.12f
-            disagreement >= 0.11f -> 0.20f
-            candidate.confidence >= 0.72f -> 0.48f
-            candidate.confidence >= 0.50f -> 0.36f
-            else -> 0.26f
+            candidate.source == LaneSource.CV_FALLBACK && !candidate.isEstimated && candidate.confidence >= 0.45f -> 0.58f
+            candidate.isEstimated -> 0.12f
+            disagreement >= 0.18f && candidate.confidence < 0.72f -> 0.14f
+            disagreement >= 0.11f -> 0.24f
+            candidate.confidence >= 0.72f -> 0.50f
+            candidate.confidence >= 0.50f -> 0.38f
+            else -> 0.27f
         }
         val keep = 1f - alpha
         val left = LaneCurve(
@@ -91,9 +91,9 @@ class LaneHybridFusion {
         val offset = previous.vehicleOffsetFraction * keep + candidate.vehicleOffsetFraction * alpha
         val rawOffset = previous.rawVehicleOffsetFraction * keep + candidate.rawVehicleOffsetFraction * alpha
         val departure = when {
-            candidate.departureLevel == LaneDepartureLevel.WARNING && candidate.confidence >= 0.42f -> LaneDepartureLevel.WARNING
-            kotlin.math.abs(offset) >= 0.25f && candidate.confidence >= 0.30f -> LaneDepartureLevel.CAUTION
-            candidate.confidence < 0.24f -> LaneDepartureLevel.UNAVAILABLE
+            candidate.departureLevel == LaneDepartureLevel.WARNING && candidate.confidence >= 0.44f -> LaneDepartureLevel.WARNING
+            kotlin.math.abs(offset) >= 0.25f && candidate.confidence >= 0.32f -> LaneDepartureLevel.CAUTION
+            candidate.confidence < 0.25f -> LaneDepartureLevel.UNAVAILABLE
             else -> LaneDepartureLevel.CENTERED
         }
         val side = if (departure >= LaneDepartureLevel.CAUTION) {
@@ -111,22 +111,32 @@ class LaneHybridFusion {
 
     private fun fuseOrChoose(core: LaneState, cv: LaneState): LaneState {
         val disagreement = geometryDisagreement(core, cv)
+        val nearDisagreement = nearGeometryDisagreement(core, cv)
+
+        if (!cv.isEstimated && cv.confidence >= 0.22f && nearDisagreement >= NEAR_CV_OVERRIDE_DISAGREEMENT) {
+            return cv.copy(
+                confidence = (cv.confidence * 1.05f).coerceIn(0f, 1f),
+                source = LaneSource.CV_FALLBACK,
+            )
+        }
+        if (core.isEstimated && !cv.isEstimated && cv.confidence >= 0.18f) return cv
+
         if (disagreement <= MAX_BLEND_DISAGREEMENT) {
-            val coreW = (core.confidence + 0.08f).coerceAtLeast(0.10f)
-            val cvW = (cv.confidence + 0.05f).coerceAtLeast(0.10f)
+            val coreW = (core.confidence + 0.04f).coerceAtLeast(0.10f)
+            val cvW = (cv.confidence + 0.18f).coerceAtLeast(0.14f)
             val sum = coreW + cvW
             val cw = coreW / sum
             val vw = cvW / sum
             val left = blend(core.left!!, cv.left!!, cw, vw)
             val right = blend(core.right!!, cv.right!!, cw, vw)
-            val confidence = (max(core.confidence, cv.confidence) * 0.92f +
+            val confidence = (max(core.confidence, cv.confidence) * 0.90f +
                 minOf(core.confidence, cv.confidence) * 0.16f).coerceIn(0f, 1f)
             val offset = core.vehicleOffsetFraction * cw + cv.vehicleOffsetFraction * vw
             val rawOffset = core.rawVehicleOffsetFraction * cw + cv.rawVehicleOffsetFraction * vw
             val departure = when {
                 confidence < 0.31f -> LaneDepartureLevel.UNAVAILABLE
-                core.departureLevel == LaneDepartureLevel.WARNING && core.confidence >= 0.40f -> LaneDepartureLevel.WARNING
                 cv.departureLevel == LaneDepartureLevel.WARNING && cv.confidence >= 0.42f -> LaneDepartureLevel.WARNING
+                core.departureLevel == LaneDepartureLevel.WARNING && core.confidence >= 0.48f && nearDisagreement < 0.08f -> LaneDepartureLevel.WARNING
                 abs(offset) >= 0.25f -> LaneDepartureLevel.CAUTION
                 else -> LaneDepartureLevel.CENTERED
             }
@@ -142,21 +152,34 @@ class LaneHybridFusion {
                 departureSide = side,
                 lookAheadY = core.lookAheadY * cw + cv.lookAheadY * vw,
                 rawVehicleOffsetFraction = rawOffset,
-                source = if (core.confidence >= cv.confidence) LaneSource.LANE_CORE else LaneSource.CV_FALLBACK,
+                source = if (cv.confidence + 0.08f >= core.confidence) LaneSource.CV_FALLBACK else LaneSource.LANE_CORE,
                 modelLatencyMs = core.modelLatencyMs,
                 isEstimated = core.isEstimated || cv.isEstimated,
             )
         }
 
-        // Large disagreement is safer to resolve by confidence than by averaging two incompatible lanes.
         return when {
-            core.confidence >= cv.confidence * 0.86f -> core
+            !cv.isEstimated && cv.confidence >= 0.22f -> cv
+            core.confidence >= cv.confidence * 1.18f -> core
             else -> cv
         }
     }
 
     private fun geometryDisagreement(a: LaneState, b: LaneState): Float {
         val ys = floatArrayOf(0.58f, 0.72f, 0.86f, 0.94f)
+        var sum = 0f
+        var count = 0
+        for (y in ys) {
+            val ab = a.boundsAt(y) ?: continue
+            val bb = b.boundsAt(y) ?: continue
+            sum += abs(ab.first - bb.first) + abs(ab.second - bb.second)
+            count += 2
+        }
+        return if (count > 0) sum / count else 1f
+    }
+
+    private fun nearGeometryDisagreement(a: LaneState, b: LaneState): Float {
+        val ys = floatArrayOf(0.78f, 0.86f, 0.92f, 0.95f)
         var sum = 0f
         var count = 0
         for (y in ys) {
@@ -180,8 +203,9 @@ class LaneHybridFusion {
     }
 
     private companion object {
-        const val HOLD_NS = 1_450_000_000L
-        const val STABILIZE_MAX_AGE_NS = 900_000_000L
-        const val MAX_BLEND_DISAGREEMENT = 0.115f
+        const val HOLD_NS = 900_000_000L
+        const val STABILIZE_MAX_AGE_NS = 800_000_000L
+        const val MAX_BLEND_DISAGREEMENT = 0.105f
+        const val NEAR_CV_OVERRIDE_DISAGREEMENT = 0.085f
     }
 }

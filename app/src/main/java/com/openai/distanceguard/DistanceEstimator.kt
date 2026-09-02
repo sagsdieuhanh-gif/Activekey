@@ -115,8 +115,17 @@ class TargetSelector(
             val membership = laneMembership(detection, lane)
             val fourWheel = detection.classId == VehicleClasses.CAR ||
                 detection.classId == VehicleClasses.BUS || detection.classId == VehicleClasses.TRUCK
-            val minOverlap = if (membership.reliable) { if (fourWheel) 0.18f else 0.32f } else 0f
-            if (!membership.centerInside && membership.overlap < minOverlap) return@mapNotNull null
+            // V14 CENTER-FIRST: candidates must actually occupy the ego corridor. Two-wheel
+            // vehicles beside us remain in the side/cut-in monitor instead of stealing lead focus.
+            val minOverlap = if (membership.reliable) {
+                if (fourWheel) 0.30f else 0.52f
+            } else {
+                if (fourWheel) 0.22f else 0.44f
+            }
+            val minCentrality = if (fourWheel) 0.24f else 0.52f
+            if ((!membership.centerInside && membership.overlap < minOverlap) ||
+                membership.centrality < minCentrality
+            ) return@mapNotNull null
             val raw = estimator.distanceMeters(detection.centerX, detection.bottom) ?: return@mapNotNull null
             val corrected = corrector.correct(raw)
             TargetMeasurement(
@@ -172,8 +181,8 @@ class TargetSelector(
                 .filter { it.first.detection.classId == VehicleClasses.MOTORCYCLE || it.first.detection.classId == VehicleClasses.BICYCLE }
                 .filter { candidate ->
                     val m = laneMembership(candidate.first.detection, lane)
-                    m.centrality >= 0.70f && m.overlap >= 0.62f &&
-                        candidate.first.correctedDistanceM <= current.first.correctedDistanceM * 0.64f
+                    m.centrality >= 0.82f && m.overlap >= 0.72f &&
+                        candidate.first.correctedDistanceM <= current.first.correctedDistanceM * 0.56f
                 }
                 .minByOrNull { it.first.correctedDistanceM }
         } else null
@@ -187,8 +196,8 @@ class TargetSelector(
         val currentFourWheel = current.first.detection.classId in setOf(VehicleClasses.CAR, VehicleClasses.BUS, VehicleClasses.TRUCK)
         val challengerMembership = laneMembership(challenger.first.detection, lane)
         val deepTwoWheelCutIn = !challengerFourWheel && currentFourWheel &&
-            challengerMembership.centrality >= 0.70f && challengerMembership.overlap >= 0.62f &&
-            challenger.first.correctedDistanceM <= current.first.correctedDistanceM * 0.64f
+            challengerMembership.centrality >= 0.82f && challengerMembership.overlap >= 0.72f &&
+            challenger.first.correctedDistanceM <= current.first.correctedDistanceM * 0.56f
         val muchCloser = challenger.first.correctedDistanceM <= current.first.correctedDistanceM * 0.66f &&
             (challengerFourWheel || !currentFourWheel || deepTwoWheelCutIn)
         val clearlyBetter = challenger.second >= current.second * SWITCH_SCORE_RATIO &&
@@ -233,16 +242,17 @@ class TargetSelector(
         val membership = laneMembership(d, lane)
         val fourWheel = d.classId == VehicleClasses.CAR || d.classId == VehicleClasses.BUS || d.classId == VehicleClasses.TRUCK
         val dwellNs = when {
-            target.correctedDistanceM <= 12f && membership.centrality >= 0.48f -> 90_000_000L
-            target.correctedDistanceM >= 60f && fourWheel -> 330_000_000L
-            fourWheel && membership.centrality >= 0.58f && membership.overlap >= 0.56f -> 170_000_000L
-            fourWheel -> 250_000_000L
-            else -> 380_000_000L
+            target.correctedDistanceM <= 12f && membership.centrality >= 0.66f -> 100_000_000L
+            target.correctedDistanceM >= 60f && fourWheel && membership.centrality >= 0.62f -> 360_000_000L
+            fourWheel && membership.centrality >= 0.68f && membership.overlap >= 0.62f -> 160_000_000L
+            fourWheel -> 290_000_000L
+            else -> 520_000_000L
         }
         val minHits = when {
-            target.correctedDistanceM <= 12f -> 2
+            target.correctedDistanceM <= 12f && membership.centrality >= 0.66f -> 2
             target.correctedDistanceM >= 60f -> 4
-            else -> 3
+            fourWheel -> 3
+            else -> 4
         }
         return life.hits >= minHits && nowNs - life.firstSeenNs >= dwellNs
     }
@@ -257,22 +267,22 @@ class TargetSelector(
         val predictedPenalty = if (d.predicted) 0.18f else 0f
         val fourWheel = d.classId == VehicleClasses.CAR || d.classId == VehicleClasses.BUS || d.classId == VehicleClasses.TRUCK
         val classPriority = when (d.classId) {
-            VehicleClasses.CAR, VehicleClasses.BUS, VehicleClasses.TRUCK -> 1.18f
-            VehicleClasses.MOTORCYCLE -> 0.16f
+            VehicleClasses.CAR, VehicleClasses.BUS, VehicleClasses.TRUCK -> 0.72f
+            VehicleClasses.MOTORCYCLE -> 0.10f
             VehicleClasses.BICYCLE -> 0.02f
             else -> 0f
         }
-        val frontBonus = if (fourWheel && centrality >= 0.36f && overlap >= 0.38f) 0.76f else 0f
-        val longRangeFrontBonus = if (fourWheel && target.correctedDistanceM in 45f..120f && centrality >= 0.55f) 0.46f else 0f
-        val twoWheelOffCenterPenalty = if (!fourWheel && (centrality < 0.58f || overlap < 0.50f)) 1.05f else 0f
-        val laneConfidenceBonus = if (membership.reliable) overlap * 0.35f else 0f
+        val frontBonus = if (fourWheel && centrality >= 0.62f && overlap >= 0.50f) 0.86f else 0f
+        val longRangeFrontBonus = if (fourWheel && target.correctedDistanceM in 45f..120f && centrality >= 0.70f) 0.54f else 0f
+        val twoWheelOffCenterPenalty = if (!fourWheel && (centrality < 0.78f || overlap < 0.64f)) 2.10f else 0f
+        val offCenterPenalty = if (centrality < 0.28f) (0.28f - centrality) * 4.0f else 0f
+        val laneConfidenceBonus = if (membership.reliable) overlap * 0.52f else 0f
 
-        // V13 LEAD FIRST: lane membership and ego-lane center dominate detector confidence and raw
-        // nearness. A small motorcycle in the adjacent lane cannot steal the lead merely because
-        // its detector score is higher or its ground projection is a little closer.
-        return centrality * 1.55f + overlap * 0.92f + laneConfidenceBonus + nearScore * 0.48f +
-            d.score.coerceIn(0f, 1f) * 0.24f + areaScore * 0.12f + classPriority +
-            frontBonus + longRangeFrontBonus - twoWheelOffCenterPenalty - predictedPenalty
+        // V14 CENTER-FIRST: centre-path membership dominates detector confidence, raw nearness and
+        // even class. Side objects stay background unless they truly move into the ego corridor.
+        return centrality * 2.85f + overlap * 1.35f + laneConfidenceBonus + nearScore * 0.30f +
+            d.score.coerceIn(0f, 1f) * 0.18f + areaScore * 0.08f + classPriority +
+            frontBonus + longRangeFrontBonus - twoWheelOffCenterPenalty - offCenterPenalty - predictedPenalty
     }
 
     private data class LaneMembership(
@@ -284,7 +294,7 @@ class TargetSelector(
 
     private fun laneMembership(d: Detection, lane: LaneState?): LaneMembership {
         val y = d.bottom.coerceIn(0.20f, 1f)
-        val dynamic = lane?.takeIf { it.left != null && it.right != null && it.confidence >= 0.30f }?.boundsAt(y)
+        val dynamic = lane?.takeIf { it.left != null && it.right != null && it.confidence >= 0.28f }?.boundsAt(y)
         val bounds = dynamic ?: laneBoundsAt(y).let { fallback ->
             val shift = estimator.roadVanishingXNorm() - 0.5f
             (fallback.first + shift).coerceIn(0f, 1f) to (fallback.second + shift).coerceIn(0f, 1f)
@@ -296,8 +306,10 @@ class TargetSelector(
         val boxWidth = d.width.coerceAtLeast(0.012f)
         val overlapWidth = (minOf(d.right, bounds.second) - maxOf(d.left, bounds.first)).coerceAtLeast(0f)
         val overlap = (overlapWidth / boxWidth).coerceIn(0f, 1f)
-        val margin = if (dynamic != null) laneWidth * 0.08f else 0f
-        val centerInside = d.centerX in (bounds.first - margin)..(bounds.second + margin)
+        // Do not extend the ego lane outward for target selection. A tiny inward safety margin
+        // keeps the focus on the actual lane centre instead of adjacent traffic.
+        val margin = if (dynamic != null) laneWidth * 0.02f else 0f
+        val centerInside = d.centerX in (bounds.first + margin)..(bounds.second - margin)
         return LaneMembership(centrality, overlap, centerInside, dynamic != null)
     }
 
@@ -333,8 +345,8 @@ class TargetSelector(
 
     companion object {
         private const val LOCK_MISSING_GRACE_NS = 850_000_000L
-        private const val SWITCH_CONFIRM_NS = 620_000_000L
-        private const val SWITCH_SCORE_RATIO = 1.32f
+        private const val SWITCH_CONFIRM_NS = 760_000_000L
+        private const val SWITCH_SCORE_RATIO = 1.48f
         private const val CANDIDATE_GAP_RESET_NS = 450_000_000L
         private const val CANDIDATE_TTL_NS = 1_600_000_000L
 
@@ -342,16 +354,18 @@ class TargetSelector(
         fun laneBoundsAt(y: Float): Pair<Float, Float> {
             val yy = y.coerceIn(0.20f, 1f)
             val t = ((yy - 0.20f) / (1f - 0.20f)).coerceIn(0f, 1f)
-            val halfWidth = 0.14f + t * 0.32f
+            // Narrower V14 fallback funnel. When lane confidence is weak we would rather miss a
+            // side vehicle than promote it to the primary lead.
+            val halfWidth = 0.10f + t * 0.25f
             return (0.5f - halfWidth) to (0.5f + halfWidth)
         }
 
         fun isInsideLane(x: Float, y: Float, lane: LaneState? = null): Boolean {
             if (y < 0.20f) return false
-            val dynamic = lane?.takeIf { it.confidence >= 0.42f }?.boundsAt(y)
+            val dynamic = lane?.takeIf { it.confidence >= 0.32f }?.boundsAt(y)
             val (left, right) = dynamic ?: laneBoundsAt(y)
-            val margin = if (dynamic != null) 0.045f else 0f
-            return x in (left - margin)..(right + margin)
+            val margin = if (dynamic != null) 0.012f else 0f
+            return x in (left + margin)..(right - margin)
         }
     }
 }

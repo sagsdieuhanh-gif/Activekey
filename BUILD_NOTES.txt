@@ -1,3 +1,14 @@
+TRUNGKIEN V14.0.0 CENTER-FIRST ADAS
+Android API 36 / JDK 17 / Gradle 9.5.0
+Artifact: TRUNGKIEN-V14-debug-apk
+
+V14 trọng tâm:
+- LANE NEAR-FIRST / PAINT-FIRST.
+- CENTER-FIRST / LEAD-FIRST.
+- Side traffic chỉ hiện khi cut-in.
+- Pedestrian ngoài ego-path bị giảm mạnh.
+- V13.2 rollback commit: 03277564eeccbcbdd467534ebffa0583d7f54ce8.
+
 TRUNGKIEN V13.2.0
 Android API 36 / JDK 17 / Gradle 9.5.0
 Artifact: TRUNGKIEN-V13.2-debug-apk
