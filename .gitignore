@@ -1,0 +1,20 @@
+.gradle/
+.gradle-local/
+.idea/
+local.properties
+*.iml
+/build/
+app/build/
+*.apk
+*.aab
+app/offline_models/*.onnx
+app/src/main/assets/*.onnx
+app/src/main/assets/*.tflite
+!app/src/main/assets/.gitkeep
+!app/offline_models/README.txt
+
+# V12 administrator signing secrets - keep off public repositories
+admin_tools/license_private_key.pem
+admin_tools/license_private_key_pkcs8.pem
+app/offline_models/*.dat
+app/src/main/assets/*.dat

@@ -1,0 +1,3 @@
+Use an ASCII-only project path such as D:\DistanceGuardV1.
+Avoid OneDrive folders containing Vietnamese/non-ASCII names for Android/Gradle builds.
+Do not add android.overridePathCheck=true unless an actual new Gradle error specifically requires it.

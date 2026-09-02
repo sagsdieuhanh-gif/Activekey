@@ -1,0 +1,14 @@
+TRUNGKIEN V12.0.0 R2 BUILD NOTES
+
+- versionCode 1201 / versionName 12.0.0.
+- Giữ tên phát hành V12 theo yêu cầu; versionCode tăng để phân biệt/cập nhật bản V12 R2.
+- preBuild phụ thuộc task prepareCorePackages.
+- road_core.dat và lane_core.dat được verify trước khi bundle vào APK.
+- Runtime không tự tải hai core package.
+- OCR biển báo dùng `com.google.mlkit:text-recognition:16.0.1` dạng bundled và chỉ được khởi tạo khi BIỂN BÁO AI bật.
+- FRONT FIRST / LONG RANGE 100m / LANE HYBRID / Hood Guard / Auto Range / Thermal Guard / trial 5 phút + license đã được tích hợp.
+- Tư vấn cự ly theo GPS dùng biên sai số một phía bảo thủ; không xác nhận SAFE chỉ từ point estimate.
+- Không vẽ CHÂN TRỜI AUTO trên giao diện; road-plane/camera geometry nội bộ vẫn phục vụ tính toán.
+- Private admin signing key KHÔNG được đưa vào APK hoặc ZIP source công khai. Dùng gói admin private tách riêng.
+- Release build bật minify + shrinkResources; debug build không minify để dễ debug.
+- Đổi tên lõi trong UI/log chỉ giảm nhận diện thông thường, không phải anti-reverse-engineering tuyệt đối.
