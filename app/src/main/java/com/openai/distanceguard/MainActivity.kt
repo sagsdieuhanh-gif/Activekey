@@ -1769,7 +1769,6 @@ class MainActivity : ComponentActivity() {
             trafficSignState.set(updated)
             runOnUiThread {
                 signButton.visibility = View.GONE
-                speaker.onTrafficSign(observation)
                 refreshCompactStatus()
             }
         }
