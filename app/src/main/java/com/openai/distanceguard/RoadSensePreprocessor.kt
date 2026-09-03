@@ -4,7 +4,7 @@ import androidx.camera.core.ImageProxy
 import kotlin.math.pow
 
 /**
- * Compatibility name is retained: tensorNchwBgr now contains PicoDet RGB/CHW normalized input.
+ * Compatibility name retained; tensorNchwBgr contains RGB/CHW PicoDet data.
  */
 data class RoadSenseFrame(
     val tensorNchwBgr: FloatArray,
@@ -20,12 +20,20 @@ data class RoadSenseFrame(
     val darkRatio: Float,
     val nightMode: Boolean,
 ) {
-    val displayAspect: Float get() = displayWidth.toFloat() / displayHeight.toFloat().coerceAtLeast(1f)
+    val displayAspect: Float get() =
+        displayWidth.toFloat() / displayHeight.toFloat().coerceAtLeast(1f)
 }
 
 /**
- * CameraX RGBA -> PicoDet 416:
- * direct resize 416x416, RGB, scale 1/255, ImageNet mean/std, CHW.
+ * Exact PaddleDetection demo_onnxruntime preprocessing:
+ *
+ * RGB image
+ * resize directly to 416x416
+ * value = (channel - mean[channel]) / std[channel]
+ *
+ * mean = [103.53, 116.28, 123.675]
+ * std  = [57.375, 57.12, 58.395]
+ * then HWC -> CHW.
  */
 class RoadSensePreprocessor(
     private val modelSize: Int = 416,
@@ -36,7 +44,7 @@ class RoadSensePreprocessor(
 
     private val nightLut = IntArray(256) { v ->
         val x = v / 255.0
-        (255.0 * x.pow(0.72)).toInt().coerceIn(0, 255)
+        (255.0 * x.pow(0.76)).toInt().coerceIn(0, 255)
     }
 
     fun preprocess(image: ImageProxy, longRangeFront: Boolean = false): RoadSenseFrame {
@@ -54,7 +62,6 @@ class RoadSensePreprocessor(
         val cropTop = if (longRangeFront) 0.08f else 0f
         val cropWidth = if (longRangeFront) 0.60f else 1f
         val cropHeight = if (longRangeFront) 0.76f else 1f
-
         val displayW = (fullDisplayW * cropWidth).toInt().coerceAtLeast(1)
         val displayH = (fullDisplayH * cropHeight).toInt().coerceAtLeast(1)
 
@@ -91,6 +98,7 @@ class RoadSensePreprocessor(
                 var g = scratch[src + 1].toInt() and 0xff
                 var b = scratch[src + 2].toInt() and 0xff
 
+                // Keep enhancement conservative; normalization below is the exact official one.
                 if (nightMode) {
                     r = nightLut[r]
                     g = nightLut[g]
@@ -98,9 +106,11 @@ class RoadSensePreprocessor(
                 }
 
                 val dst = ty * modelSize + tx
-                reusableInput[dst] = ((r / 255f) - 0.485f) / 0.229f
-                reusableInput[gOffset + dst] = ((g / 255f) - 0.456f) / 0.224f
-                reusableInput[bOffset + dst] = ((b / 255f) - 0.406f) / 0.225f
+
+                // Exact official ONNXRuntime demo constants and channel order.
+                reusableInput[dst] = (r - 103.53f) / 57.375f
+                reusableInput[gOffset + dst] = (g - 116.28f) / 57.12f
+                reusableInput[bOffset + dst] = (b - 123.675f) / 58.395f
             }
         }
 

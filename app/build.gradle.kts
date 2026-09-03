@@ -20,8 +20,8 @@ android {
         ndk {
             abiFilters += "arm64-v8a"
         }
-        versionCode = 1571
-        versionName = "15.7.1"
+        versionCode = 1572
+        versionName = "15.7.2"
     }
 
     buildTypes {
@@ -93,7 +93,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
                 connectTimeout = 30_000
                 readTimeout = 180_000
                 instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "TrungKien-V15.7B-PicoDet/15.7.1")
+                setRequestProperty("User-Agent", "TrungKien-V15.7C-PicoDet/15.7.2")
                 setRequestProperty("Accept", "application/octet-stream")
             }
             try {

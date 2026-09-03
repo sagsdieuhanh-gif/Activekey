@@ -9,8 +9,9 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * V15.7B PP-PicoDet-M 416 road-user detector.
- * Stable test: XNNPACK first, no NNAPI.
+ * V15.7C PP-PicoDet-M 416.
+ * Exact PaddleDetection ONNXRuntime contract:
+ * image + im_shape + scale_factor; output[0] = N x 6 boxes.
  */
 class RoadSenseEngine private constructor(
     private val environment: OrtEnvironment,
@@ -27,7 +28,7 @@ class RoadSenseEngine private constructor(
 
     fun detect(frame: RoadSenseFrame, scoreThreshold: Float = 0.13f): List<Detection> {
         require(frame.tensorNchwBgr.size == INPUT_ELEMENTS) {
-            "PicoDet input must contain $INPUT_ELEMENTS floats, got ${frame.tensorNchwBgr.size}"
+            "PicoDet input must contain $INPUT_ELEMENTS floats"
         }
 
         inputBuffer.clear()
@@ -39,14 +40,21 @@ class RoadSenseEngine private constructor(
         feeds[imageInputName] = inputTensor
 
         try {
-            if (inputNames.contains("scale_factor")) {
-                val t = makeSmallTensor(floatArrayOf(1f, 1f))
-                feeds["scale_factor"] = t
+            if (inputNames.contains("im_shape")) {
+                val t = makeSmallTensor(
+                    floatArrayOf(INPUT_SIZE.toFloat(), INPUT_SIZE.toFloat())
+                )
+                feeds["im_shape"] = t
                 extras += t
             }
-            if (inputNames.contains("im_shape")) {
-                val t = makeSmallTensor(floatArrayOf(INPUT_SIZE.toFloat(), INPUT_SIZE.toFloat()))
-                feeds["im_shape"] = t
+
+            if (inputNames.contains("scale_factor")) {
+                // Official demo:
+                // scale_factor = [inputH / originalH, inputW / originalW].
+                val sy = INPUT_SIZE.toFloat() / frame.displayHeight.toFloat().coerceAtLeast(1f)
+                val sx = INPUT_SIZE.toFloat() / frame.displayWidth.toFloat().coerceAtLeast(1f)
+                val t = makeSmallTensor(floatArrayOf(sy, sx))
+                feeds["scale_factor"] = t
                 extras += t
             }
 
@@ -54,9 +62,9 @@ class RoadSenseEngine private constructor(
                 val first = result.get(0) as? OnnxTensor
                     ?: error("PicoDet output[0] is not a tensor")
                 val fb = first.floatBuffer ?: error("PicoDet output[0] is not Float32")
-                val values = FloatArray(fb.remaining())
-                fb.get(values)
-                return decode(values, frame, scoreThreshold)
+                val boxes = FloatArray(fb.remaining())
+                fb.get(boxes)
+                return decode(boxes, frame, scoreThreshold)
             }
         } finally {
             extras.forEach { runCatching { it.close() } }
@@ -68,31 +76,30 @@ class RoadSenseEngine private constructor(
         val fb = bb.asFloatBuffer()
         fb.put(values)
         fb.flip()
-        return OnnxTensor.createTensor(environment, fb, longArrayOf(1, values.size.toLong()))
+        return OnnxTensor.createTensor(environment, fb, longArrayOf(1, 2))
     }
 
-    /**
-     * Official postprocessed PicoDet output:
-     * [classId, score, x1, y1, x2, y2] repeated N times.
-     */
     private fun decode(boxes: FloatArray, frame: RoadSenseFrame, threshold: Float): List<Detection> {
         require(boxes.size % 6 == 0) {
-            "Unexpected PicoDet output size ${boxes.size}; expected N x 6"
+            "Unexpected PicoDet output size ${boxes.size}"
         }
 
-        val out = ArrayList<Detection>(24)
+        val out = ArrayList<Detection>(32)
+        val dw = frame.displayWidth.toFloat().coerceAtLeast(1f)
+        val dh = frame.displayHeight.toFloat().coerceAtLeast(1f)
 
         var base = 0
         while (base + 5 < boxes.size) {
             val sourceClass = boxes[base].toInt()
             val score = boxes[base + 1]
 
-            if (score.isFinite() && score > 0f && sourceClass in ROAD_USER_CLASSES) {
+            // Official demo treats class -1 as invalid.
+            if (sourceClass >= 0 && score.isFinite() && sourceClass in ROAD_USER_CLASSES) {
                 val classThreshold = when (sourceClass) {
                     2, 5, 7 -> {
                         val floor = when {
-                            frame.nightMode && frame.longRangeFront -> 0.050f
-                            frame.nightMode -> 0.060f
+                            frame.nightMode && frame.longRangeFront -> 0.05f
+                            frame.nightMode -> 0.06f
                             frame.longRangeFront -> 0.065f
                             else -> 0.075f
                         }
@@ -106,19 +113,21 @@ class RoadSenseEngine private constructor(
                 }
 
                 if (score >= classThreshold) {
-                    val x1 = (boxes[base + 2] / INPUT_SIZE.toFloat()).coerceIn(0f, 1f)
-                    val y1 = (boxes[base + 3] / INPUT_SIZE.toFloat()).coerceIn(0f, 1f)
-                    val x2 = (boxes[base + 4] / INPUT_SIZE.toFloat()).coerceIn(0f, 1f)
-                    val y2 = (boxes[base + 5] / INPUT_SIZE.toFloat()).coerceIn(0f, 1f)
+                    // With the official scale_factor the postprocessed model returns box
+                    // coordinates in the pre-resize/original crop coordinate system.
+                    val localLeft = (boxes[base + 2] / dw).coerceIn(0f, 1f)
+                    val localTop = (boxes[base + 3] / dh).coerceIn(0f, 1f)
+                    val localRight = (boxes[base + 4] / dw).coerceIn(0f, 1f)
+                    val localBottom = (boxes[base + 5] / dh).coerceIn(0f, 1f)
 
-                    if (x2 > x1 && y2 > y1) {
+                    if (localRight > localLeft && localBottom > localTop) {
                         val d = Detection(
                             classId = mapClass(sourceClass),
                             score = score,
-                            left = (frame.cropLeftNorm + x1 * frame.cropWidthNorm).coerceIn(0f, 1f),
-                            top = (frame.cropTopNorm + y1 * frame.cropHeightNorm).coerceIn(0f, 1f),
-                            right = (frame.cropLeftNorm + x2 * frame.cropWidthNorm).coerceIn(0f, 1f),
-                            bottom = (frame.cropTopNorm + y2 * frame.cropHeightNorm).coerceIn(0f, 1f),
+                            left = (frame.cropLeftNorm + localLeft * frame.cropWidthNorm).coerceIn(0f, 1f),
+                            top = (frame.cropTopNorm + localTop * frame.cropHeightNorm).coerceIn(0f, 1f),
+                            right = (frame.cropLeftNorm + localRight * frame.cropWidthNorm).coerceIn(0f, 1f),
+                            bottom = (frame.cropTopNorm + localBottom * frame.cropHeightNorm).coerceIn(0f, 1f),
                         )
                         if (d.width >= 0.0025f && d.height >= 0.0030f) out += d
                     }
@@ -128,7 +137,7 @@ class RoadSenseEngine private constructor(
             base += 6
         }
 
-        return out.sortedByDescending { it.score }.take(24)
+        return out.sortedByDescending { it.score }.take(32)
     }
 
     override fun close() {
@@ -151,8 +160,8 @@ class RoadSenseEngine private constructor(
                 val opts = OrtSession.SessionOptions()
                 try {
                     opts.addXnnpack(mapOf("intra_op_num_threads" to "2"))
-                    val s = env.createSession(modelFile.absolutePath, opts)
-                    return RoadSenseEngine(env, s, "PICODET-M416/XNNPACK")
+                    val session = env.createSession(modelFile.absolutePath, opts)
+                    return RoadSenseEngine(env, session, "PICODET-M416/XNNPACK")
                 } finally {
                     opts.close()
                 }
@@ -161,8 +170,8 @@ class RoadSenseEngine private constructor(
             val opts = OrtSession.SessionOptions()
             try {
                 opts.setIntraOpNumThreads(2)
-                val s = env.createSession(modelFile.absolutePath, opts)
-                return RoadSenseEngine(env, s, "PICODET-M416/CPU")
+                val session = env.createSession(modelFile.absolutePath, opts)
+                return RoadSenseEngine(env, session, "PICODET-M416/CPU")
             } finally {
                 opts.close()
             }
