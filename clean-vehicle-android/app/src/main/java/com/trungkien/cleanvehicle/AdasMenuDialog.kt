@@ -103,7 +103,7 @@ class AdasMenuDialog(
 
         scroll.addView(
             root,
-            ScrollView.LayoutParams(
+            ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             )
@@ -111,7 +111,7 @@ class AdasMenuDialog(
 
         root.addView(
             title(
-                "TRUNGKIEN ADAS V2.3",
+                "TRUNGKIEN ADAS V2.3.1",
                 26f,
             )
         )

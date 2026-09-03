@@ -1,4 +1,4 @@
-name: TrungKien ADAS V2.3 MENU
+name: TrungKien ADAS V2.3.1 MENU FIX2
 
 on:
   workflow_dispatch:
@@ -60,7 +60,7 @@ jobs:
             "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  clean-vehicle-android/app/src/main/assets/ufld_culane.onnx" \
             | sha256sum -c -
 
-      - name: Build ADAS V2.3
+      - name: Build ADAS V2.3.1
         working-directory: clean-vehicle-android
         run: gradle --no-daemon clean :app:assembleDebug --stacktrace
 
@@ -74,9 +74,9 @@ jobs:
 
           cp \
             "$APK" \
-            "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN ADAS V2.3 MENU.apk"
+            "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN ADAS V2.3.1 MENU.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TrungKien-ADAS-V2.3-MENU
-          path: "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN ADAS V2.3 MENU.apk"
+          name: TrungKien-ADAS-V2.3.1-MENU-FIX2
+          path: "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN ADAS V2.3.1 MENU.apk"
