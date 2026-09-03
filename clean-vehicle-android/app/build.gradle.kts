@@ -8,11 +8,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.trungkien.adas.v201full"
+        applicationId = "com.trungkien.adas.v21smartlead"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2010
-        versionName = "2.0.1"
+        versionCode = 2100
+        versionName = "2.1.0"
 
         ndk {
             abiFilters += "arm64-v8a"

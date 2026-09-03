@@ -16,6 +16,24 @@ class AdasDecisionEngine {
         var previousDistance: Float = -1f,
         var previousTimeMs: Long = 0L,
         var closingEma: Float = 0f,
+        var centerX: Float = 0f,
+        var centerY: Float = 0f,
+        var velocityX: Float = 0f,
+        var velocityY: Float = 0f,
+        var lastUpdateMs: Long = 0L,
+    )
+
+    private data class LaneRelation(
+        val acquire: Boolean,
+        val hold: Boolean,
+        val normalizedOffset: Float,
+    )
+
+    private data class LaneDecision(
+        val active: Boolean,
+        val direction: Int,
+        val timeToCrossSeconds: Float?,
+        val offsetRatio: Float,
     )
 
     private val tracks =
@@ -24,6 +42,28 @@ class AdasDecisionEngine {
     private var nextTrackId =
         1
 
+    // Stateful lead manager.
+    private var currentLeadId:
+        Int? =
+        null
+
+    private var candidateLeadId:
+        Int? =
+        null
+
+    private var candidateLeadFrames =
+        0
+
+    private var currentLeadOutsideFrames =
+        0
+
+    private var lastLeadSwitchMs =
+        0L
+
+    private var lastLeadSwitchReason =
+        "NONE"
+
+    // FCW / HMW / LDW state.
     private var fcwLevel =
         0
 
@@ -48,9 +88,7 @@ class AdasDecisionEngine {
     private var lastLdwVoiceMs =
         0L
 
-    private var lastHmwCueMs =
-        0L
-
+    // Lead-start state.
     private var stopTrackId:
         Int? =
         null
@@ -81,50 +119,47 @@ class AdasDecisionEngine {
         nowMs: Long,
     ): AdasSnapshot {
         updateTracks(
-            detections,
-            lane,
-            nowMs,
+            detections = detections,
+            lane = lane,
+            nowMs = nowMs,
         )
 
+        // Visible/stable pool used by ADAS decisions.
+        // Track objects live longer internally, but a stale track is not allowed to trigger FCW.
         val stable =
             tracks.filter {
-                it.hits >=
-                    MIN_STABLE_HITS &&
-                    it.misses <=
-                        1 &&
-                    it.distance >
-                        0f
+                it.hits >= MIN_STABLE_HITS &&
+                    it.misses <= LEAD_MAX_STALE_MISSES &&
+                    it.distance > 0f
             }
 
         val leadTrack =
-            chooseLead(
-                stable,
-                lane,
+            selectLeadWithHandoff(
+                stable = stable,
+                lane = lane,
+                nowMs = nowMs,
             )
 
         val vehicles =
-            stable.map {
-                track ->
-                AdasVehicle(
-                    trackId =
-                        track.id,
-                    detection =
-                        track.detection,
-                    distanceMeters =
-                        track.distance,
-                    closingSpeedMps =
-                        track.closingEma.coerceAtLeast(
-                            0f
-                        ),
-                    isLead =
-                        track.id ==
-                            leadTrack?.id,
-                    stableFrames =
-                        track.hits,
-                )
-            }.sortedBy {
-                it.distanceMeters
-            }
+            stable
+                .filter {
+                    it.misses <= UI_MAX_STALE_MISSES
+                }
+                .map { track ->
+                    AdasVehicle(
+                        trackId = track.id,
+                        detection = track.detection,
+                        distanceMeters = track.distance,
+                        closingSpeedMps =
+                            track.closingEma.coerceAtLeast(0f),
+                        isLead =
+                            track.id == leadTrack?.id,
+                        stableFrames = track.hits,
+                    )
+                }
+                .sortedBy {
+                    it.distanceMeters
+                }
 
         val lead =
             vehicles.firstOrNull {
@@ -133,10 +168,8 @@ class AdasDecisionEngine {
 
         val ttc =
             if (
-                lead !=
-                    null &&
-                lead.closingSpeedMps >=
-                    MIN_CLOSING_SPEED
+                lead != null &&
+                lead.closingSpeedMps >= MIN_CLOSING_SPEED
             ) {
                 (
                     lead.distanceMeters /
@@ -152,20 +185,15 @@ class AdasDecisionEngine {
 
         val speedMps =
             speedKph
-                ?.div(
-                    3.6f
-                )
+                ?.div(3.6f)
                 ?.takeIf {
-                    it >
-                        0.8f
+                    it > 0.8f
                 }
 
         val headway =
             if (
-                lead !=
-                    null &&
-                speedMps !=
-                    null
+                lead != null &&
+                speedMps != null
             ) {
                 (
                     lead.distanceMeters /
@@ -181,130 +209,102 @@ class AdasDecisionEngine {
 
         val newFcw =
             computeFcwLevel(
-                ttc =
-                    ttc,
-                leadDistance =
-                    lead?.distanceMeters,
-                speedKph =
-                    speedKph,
+                ttc = ttc,
+                leadDistance = lead?.distanceMeters,
+                speedKph = speedKph,
             )
 
         val hmwWarning =
             computeHeadwayWarning(
-                headway,
-                speedKph,
-                nowMs,
+                headway = headway,
+                speedKph = speedKph,
             )
 
         val laneState =
             computeLaneDeparture(
-                lane,
-                speedKph,
-                nowMs,
+                lane = lane,
+                speedKph = speedKph,
+                nowMs = nowMs,
             )
 
         val leadMoved =
             computeLeadMoved(
-                lead,
-                speedKph,
-                nowMs,
+                lead = lead,
+                speedKph = speedKph,
+                nowMs = nowMs,
             )
 
         val voiceFcw =
-            newFcw >=
-                3 &&
-                nowMs -
-                    lastFcwVoiceMs >
+            newFcw >= 3 &&
+                nowMs - lastFcwVoiceMs >
                     FCW_VOICE_COOLDOWN_MS
 
-        if (
-            voiceFcw
-        ) {
+        if (voiceFcw) {
             lastFcwVoiceMs =
                 nowMs
         }
 
         val voiceLdw =
-            laneState.first &&
-                nowMs -
-                    lastLdwVoiceMs >
+            laneState.active &&
+                nowMs - lastLdwVoiceMs >
                     LDW_VOICE_COOLDOWN_MS
 
-        if (
-            voiceLdw
-        ) {
+        if (voiceLdw) {
             lastLdwVoiceMs =
                 nowMs
         }
 
         val warnings =
             AdasWarnings(
-                fcwLevel =
-                    newFcw,
-                hmwWarning =
-                    hmwWarning,
-                ldwWarning =
-                    laneState.first,
-                ldwDirection =
-                    laneState.second,
-                leadMovedEvent =
-                    leadMoved,
-                voiceFcwEvent =
-                    voiceFcw,
-                voiceLdwEvent =
-                    voiceLdw,
+                fcwLevel = newFcw,
+                hmwWarning = hmwWarning,
+                ldwWarning = laneState.active,
+                ldwDirection = laneState.direction,
+                leadMovedEvent = leadMoved,
+                voiceFcwEvent = voiceFcw,
+                voiceLdwEvent = voiceLdw,
             )
 
         return AdasSnapshot(
-            vehicles =
-                vehicles,
-            lead =
-                lead,
-            speedKph =
-                speedKph,
-            headwaySeconds =
-                headway,
-            ttcSeconds =
-                ttc,
+            vehicles = vehicles,
+            lead = lead,
+            speedKph = speedKph,
+            headwaySeconds = headway,
+            ttcSeconds = ttc,
             timeToLaneCrossSeconds =
-                laneState.third,
+                laneState.timeToCrossSeconds,
             lateralOffsetRatio =
-                laneState.fourth,
-            lane =
-                lane,
-            hoodTopNorm =
-                hoodTopNorm,
-            warnings =
-                warnings,
+                laneState.offsetRatio,
+            lane = lane,
+            hoodTopNorm = hoodTopNorm,
+            warnings = warnings,
             debugText =
                 buildString {
-                    append(
-                        "tracks="
-                    )
-                    append(
-                        tracks.size
-                    )
-                    append(
-                        " stable="
-                    )
-                    append(
-                        vehicles.size
-                    )
-                    append(
-                        " fcwEvidence="
-                    )
-                    append(
-                        fcwEvidence
-                    )
-                    append(
-                        " ldwEvidence="
-                    )
-                    append(
-                        ldwEvidence
-                    )
+                    append("tracks=")
+                    append(tracks.size)
+                    append(" stable=")
+                    append(stable.size)
+                    append(" lead=#")
+                    append(currentLeadId ?: 0)
+                    append(" cand=#")
+                    append(candidateLeadId ?: 0)
+                    append("/")
+                    append(candidateLeadFrames)
+                    append(" out=")
+                    append(currentLeadOutsideFrames)
+                    append(" switch=")
+                    append(lastLeadSwitchReason)
+                    append(" fcwEv=")
+                    append(fcwEvidence)
+                    append(" ldwEv=")
+                    append(ldwEvidence)
                 },
         )
     }
+
+    // -------------------------------------------------------------------------
+    // Multi-object tracking
+    // -------------------------------------------------------------------------
 
     private fun updateTracks(
         detections: List<Detection>,
@@ -312,19 +312,37 @@ class AdasDecisionEngine {
         nowMs: Long,
     ) {
         val vehicleDetections =
-            detections.filter {
-                YoloXTinyDetector.isVehicle(
-                    it.classId
-                )
-            }
+            detections
+                .filter {
+                    YoloXTinyDetector.isVehicle(
+                        it.classId
+                    )
+                }
+                .sortedByDescending {
+                    it.score
+                }
 
-        val unmatched =
+        val unmatchedTracks =
             tracks.toMutableSet()
 
-        for (
-            detection in
-            vehicleDetections
-        ) {
+        for (detection in vehicleDetections) {
+            val dcx =
+                (
+                    detection.left +
+                        detection.right
+                    ) *
+                    0.5f
+
+            val dcy =
+                (
+                    detection.top +
+                        detection.bottom
+                    ) *
+                    0.5f
+
+            val dArea =
+                boxArea(detection)
+
             var best:
                 Track? =
                 null
@@ -332,10 +350,7 @@ class AdasDecisionEngine {
             var bestScore =
                 Float.NEGATIVE_INFINITY
 
-            for (
-                track in
-                unmatched
-            ) {
+            for (track in unmatchedTracks) {
                 if (
                     !sameVehicleFamily(
                         track.detection.classId,
@@ -345,62 +360,149 @@ class AdasDecisionEngine {
                     continue
                 }
 
+                val dt =
+                    if (track.lastUpdateMs > 0L) {
+                        (
+                            nowMs -
+                                track.lastUpdateMs
+                            ) /
+                            1000f
+                    } else {
+                        0f
+                    }
+
+                val predictionDt =
+                    dt.coerceIn(
+                        0f,
+                        0.80f,
+                    )
+
+                val predictedX =
+                    track.centerX +
+                        track.velocityX *
+                        predictionDt
+
+                val predictedY =
+                    track.centerY +
+                        track.velocityY *
+                        predictionDt
+
+                val predictedDelta =
+                    abs(
+                        predictedX -
+                            dcx
+                    ) +
+                        abs(
+                            predictedY -
+                                dcy
+                        )
+
                 val iou =
                     track.detection.iou(
                         detection
                     )
 
-                val centerDelta =
-                    centerDistance(
-                        track.detection,
-                        detection,
+                val oldArea =
+                    boxArea(
+                        track.detection
                     )
 
+                val areaRatio =
+                    if (
+                        oldArea > 0f &&
+                        dArea > 0f
+                    ) {
+                        min(
+                            oldArea,
+                            dArea,
+                        ) /
+                            max(
+                                oldArea,
+                                dArea,
+                            )
+                    } else {
+                        0f
+                    }
+
                 val acceptable =
-                    iou >=
-                        0.22f ||
+                    iou >= 0.16f ||
                         (
-                            iou >=
-                                0.07f &&
-                                centerDelta <=
-                                    0.060f
+                            predictedDelta <=
+                                0.075f &&
+                                areaRatio >=
+                                    0.38f
+                            ) ||
+                        (
+                            track.id ==
+                                currentLeadId &&
+                                predictedDelta <=
+                                    0.095f &&
+                                areaRatio >=
+                                    0.30f
                             )
 
-                val matchScore =
-                    iou +
-                        (
-                            0.09f -
-                                centerDelta
-                            )
-                            .coerceAtLeast(
-                                0f
-                            )
+                if (!acceptable) {
+                    continue
+                }
+
+                val exactClassBonus =
+                    if (
+                        track.detection.classId ==
+                        detection.classId
+                    ) {
+                        0.10f
+                    } else {
+                        0f
+                    }
+
+                val currentLeadBonus =
+                    if (
+                        track.id ==
+                        currentLeadId
+                    ) {
+                        0.10f
+                    } else {
+                        0f
+                    }
+
+                val score =
+                    iou *
+                        1.70f -
+                        predictedDelta *
+                        4.20f +
+                        areaRatio *
+                        0.38f +
+                        exactClassBonus +
+                        currentLeadBonus
 
                 if (
-                    acceptable &&
-                    matchScore >
-                        bestScore
+                    score >
+                    bestScore
                 ) {
                     best =
                         track
 
                     bestScore =
-                        matchScore
+                        score
                 }
             }
 
             val rawDistance =
                 estimateDistance(
-                    detection,
-                    lane.horizonNorm,
+                    detection = detection,
+                    horizonNorm =
+                        lane.horizonNorm,
                 )
 
-            if (
-                best !=
-                null
-            ) {
-                unmatched.remove(
+            if (best != null) {
+                unmatchedTracks.remove(
                     best
+                )
+
+                updateMotion(
+                    track = best,
+                    detection = detection,
+                    nowMs = nowMs,
                 )
 
                 best.detection =
@@ -411,31 +513,31 @@ class AdasDecisionEngine {
                 best.misses =
                     0
 
-                if (
-                    rawDistance !=
-                    null
-                ) {
-                    val newDistance =
+                if (rawDistance != null) {
+                    val smoothedDistance =
                         if (
-                            best.distance <=
-                            0f
+                            best.distance <= 0f
                         ) {
                             rawDistance
                         } else {
                             best.distance *
-                                0.72f +
+                                DISTANCE_KEEP +
                                 rawDistance *
-                                0.28f
+                                (
+                                    1f -
+                                        DISTANCE_KEEP
+                                    )
                         }
 
                     updateClosingSpeed(
-                        best,
-                        newDistance,
-                        nowMs,
+                        track = best,
+                        newDistance =
+                            smoothedDistance,
+                        nowMs = nowMs,
                     )
 
                     best.distance =
-                        newDistance
+                        smoothedDistance
                 }
             } else if (
                 isStrongEnoughForNewTrack(
@@ -456,21 +558,120 @@ class AdasDecisionEngine {
                                 ?: -1f,
                         previousTimeMs =
                             nowMs,
+                        centerX =
+                            dcx,
+                        centerY =
+                            dcy,
+                        lastUpdateMs =
+                            nowMs,
                     )
             }
         }
 
-        for (
-            track in
-            unmatched
-        ) {
+        for (track in unmatchedTracks) {
             track.misses++
+
+            // Closing speed must decay while detector is missing the target.
+            track.closingEma *=
+                0.84f
         }
 
         tracks.removeAll {
             it.misses >
-                MAX_MISSES
+                TRACK_MAX_MISSES
         }
+
+        // If the current lead track finally expires completely, release its ID.
+        if (
+            currentLeadId != null &&
+            tracks.none {
+                it.id ==
+                    currentLeadId
+            }
+        ) {
+            clearCurrentLead(
+                reason =
+                    "TRACK_EXPIRED",
+            )
+        }
+    }
+
+    private fun updateMotion(
+        track: Track,
+        detection: Detection,
+        nowMs: Long,
+    ) {
+        val newX =
+            (
+                detection.left +
+                    detection.right
+                ) *
+                0.5f
+
+        val newY =
+            (
+                detection.top +
+                    detection.bottom
+                ) *
+                0.5f
+
+        if (
+            track.lastUpdateMs >
+            0L
+        ) {
+            val dt =
+                (
+                    nowMs -
+                        track.lastUpdateMs
+                    ) /
+                    1000f
+
+            if (
+                dt in
+                    0.08f..1.5f
+            ) {
+                val observedVx =
+                    (
+                        newX -
+                            track.centerX
+                        ) /
+                        dt
+
+                val observedVy =
+                    (
+                        newY -
+                            track.centerY
+                        ) /
+                        dt
+
+                track.velocityX =
+                    track.velocityX *
+                        MOTION_KEEP +
+                        observedVx *
+                        (
+                            1f -
+                                MOTION_KEEP
+                            )
+
+                track.velocityY =
+                    track.velocityY *
+                        MOTION_KEEP +
+                        observedVy *
+                        (
+                            1f -
+                                MOTION_KEEP
+                            )
+            }
+        }
+
+        track.centerX =
+            newX
+
+        track.centerY =
+            newY
+
+        track.lastUpdateMs =
+            nowMs
     }
 
     private fun updateClosingSpeed(
@@ -495,7 +696,7 @@ class AdasDecisionEngine {
                 dt in
                     0.12f..2.0f
             ) {
-                val raw =
+                val rawClosing =
                     (
                         track.previousDistance -
                             newDistance
@@ -503,17 +704,20 @@ class AdasDecisionEngine {
                         dt
 
                 if (
-                    raw.isFinite() &&
+                    rawClosing.isFinite() &&
                     abs(
-                        raw
+                        rawClosing
                     ) <=
                         45f
                 ) {
                     track.closingEma =
                         track.closingEma *
-                            0.72f +
-                            raw *
-                            0.28f
+                            CLOSING_KEEP +
+                            rawClosing *
+                            (
+                                1f -
+                                    CLOSING_KEEP
+                                )
                 }
             }
         }
@@ -525,58 +729,472 @@ class AdasDecisionEngine {
             nowMs
     }
 
-    private fun chooseLead(
+    // -------------------------------------------------------------------------
+    // Smart lead selection / handoff
+    // -------------------------------------------------------------------------
+
+    private fun selectLeadWithHandoff(
         stable: List<Track>,
         lane: AdasLaneGeometry,
+        nowMs: Long,
     ): Track? {
-        val candidates =
+        val fresh =
             stable.filter {
-                track ->
-                val d =
-                    track.detection
+                it.misses <=
+                    LEAD_MAX_STALE_MISSES &&
+                    isRoadCandidate(
+                        it,
+                        lane,
+                    )
+            }
 
-                val centerX =
-                    (
-                        d.left +
-                            d.right
-                        ) *
-                        0.5f
+        val current =
+            currentLeadId
+                ?.let {
+                    id ->
+                    fresh.firstOrNull {
+                        it.id ==
+                            id
+                    }
+                }
+
+        val best =
+            fresh
+                .filter {
+                    laneRelation(
+                        track = it,
+                        lane = lane,
+                    ).acquire
+                }
+                .minByOrNull {
+                    leadScore(
+                        track = it,
+                        lane = lane,
+                    )
+                }
+
+        // Initial acquisition: a track is already stable for >=3 frames.
+        if (current == null) {
+            if (best != null) {
+                switchLead(
+                    newTrack = best,
+                    reason =
+                        if (
+                            currentLeadId ==
+                            null
+                        ) {
+                            "ACQUIRE"
+                        } else {
+                            "REACQUIRE"
+                        },
+                    nowMs = nowMs,
+                )
+
+                return best
+            }
+
+            if (
+                currentLeadId !=
+                null
+            ) {
+                currentLeadOutsideFrames++
 
                 if (
-                    lane.valid &&
-                    lane.confidence >=
-                        0.38f
+                    currentLeadOutsideFrames >=
+                    RELEASE_MISSING_FRAMES
                 ) {
-                    val y =
-                        d.bottom.coerceIn(
-                            0.45f,
-                            0.96f,
-                        )
-
-                    val left =
-                        lane.leftX(
-                            y
-                        ) -
-                            0.035f
-
-                    val right =
-                        lane.rightX(
-                            y
-                        ) +
-                            0.035f
-
-                    centerX in
-                        left..right
-                } else {
-                    centerX in
-                        0.28f..0.72f
+                    clearCurrentLead(
+                        reason =
+                            "MISSING_RELEASE",
+                    )
                 }
             }
 
-        return candidates.minByOrNull {
-            it.distance
+            return null
+        }
+
+        val currentRelation =
+            laneRelation(
+                track = current,
+                lane = lane,
+            )
+
+        if (currentRelation.hold) {
+            currentLeadOutsideFrames =
+                0
+        } else {
+            currentLeadOutsideFrames++
+        }
+
+        // Current remains best -> strongest possible continuity.
+        if (
+            best?.id ==
+            current.id
+        ) {
+            clearCandidate()
+            return current
+        }
+
+        if (best == null) {
+            clearCandidate()
+
+            // Do not drop a lead due to a single bad lane frame.
+            if (
+                !currentRelation.hold &&
+                currentLeadOutsideFrames >=
+                    RELEASE_OUTSIDE_FRAMES
+            ) {
+                clearCurrentLead(
+                    reason =
+                        "LEFT_EGO_LANE_NO_TARGET",
+                )
+
+                return null
+            }
+
+            return current
+        }
+
+        val bestRelation =
+            laneRelation(
+                track = best,
+                lane = lane,
+            )
+
+        // A cut-in or a new closer vehicle ahead must become lead after persistence.
+        val clearlyCloser =
+            best.distance <
+                current.distance *
+                    CUT_IN_DISTANCE_RATIO ||
+                best.distance +
+                    CUT_IN_ABSOLUTE_ADVANTAGE_M <
+                    current.distance
+
+        // When our car changes lane, current old-lane lead moves to edge/outside,
+        // while the new-lane vehicle moves toward the ego-lane center.
+        val laneHandoff =
+            !currentRelation.acquire &&
+                bestRelation.acquire
+
+        // If current is fully outside, handoff should be faster.
+        val currentExited =
+            !currentRelation.hold &&
+                currentLeadOutsideFrames >=
+                    OUTSIDE_CONFIRM_FRAMES
+
+        val switchAllowed =
+            clearlyCloser ||
+                laneHandoff ||
+                currentExited
+
+        if (!switchAllowed) {
+            clearCandidate()
+            return current
+        }
+
+        accumulateCandidate(
+            best.id
+        )
+
+        val requiredFrames =
+            if (currentExited) {
+                1
+            } else {
+                LEAD_SWITCH_CONFIRM_FRAMES
+            }
+
+        val minHoldSatisfied =
+            nowMs -
+                lastLeadSwitchMs >=
+                LEAD_MIN_HOLD_MS ||
+                currentExited ||
+                clearlyCloser
+
+        if (
+            candidateLeadFrames >=
+                requiredFrames &&
+            minHoldSatisfied
+        ) {
+            val reason =
+                when {
+                    currentExited ->
+                        "LANE_EXIT"
+
+                    laneHandoff ->
+                        "LANE_HANDOFF"
+
+                    clearlyCloser ->
+                        "CUT_IN"
+
+                    else ->
+                        "BETTER_TARGET"
+                }
+
+            switchLead(
+                newTrack = best,
+                reason = reason,
+                nowMs = nowMs,
+            )
+
+            return best
+        }
+
+        return current
+    }
+
+    private fun laneRelation(
+        track: Track,
+        lane: AdasLaneGeometry,
+    ): LaneRelation {
+        val d =
+            track.detection
+
+        val centerX =
+            (
+                d.left +
+                    d.right
+                ) *
+                0.5f
+
+        if (
+            lane.valid &&
+            lane.confidence >=
+                LEAD_LANE_CONFIDENCE
+        ) {
+            val y =
+                d.bottom.coerceIn(
+                    0.45f,
+                    0.97f,
+                )
+
+            val left =
+                lane.leftX(
+                    y
+                )
+
+            val right =
+                lane.rightX(
+                    y
+                )
+
+            val width =
+                (
+                    right -
+                        left
+                    )
+                    .coerceAtLeast(
+                        0.12f
+                    )
+
+            val laneCenter =
+                (
+                    left +
+                        right
+                    ) *
+                    0.5f
+
+            val normalized =
+                abs(
+                    centerX -
+                        laneCenter
+                ) /
+                    (
+                        width *
+                            0.5f
+                        )
+
+            return LaneRelation(
+                acquire =
+                    normalized <=
+                        LEAD_ACQUIRE_LANE_RATIO,
+                hold =
+                    normalized <=
+                        LEAD_HOLD_LANE_RATIO,
+                normalizedOffset =
+                    normalized,
+            )
+        }
+
+        // Lane unavailable: use a wider corridor only as fallback.
+        val normalized =
+            abs(
+                centerX -
+                    FALLBACK_CENTER_X
+            ) /
+                FALLBACK_HALF_WIDTH
+
+        return LaneRelation(
+            acquire =
+                normalized <=
+                    1.0f,
+            hold =
+                normalized <=
+                    1.22f,
+            normalizedOffset =
+                normalized,
+        )
+    }
+
+    private fun leadScore(
+        track: Track,
+        lane: AdasLaneGeometry,
+    ): Float {
+        val relation =
+            laneRelation(
+                track = track,
+                lane = lane,
+            )
+
+        // Lower is better:
+        // distance dominates; lane centrality, confidence and track age break ties.
+        val centralityPenalty =
+            relation.normalizedOffset *
+                (
+                    1.2f +
+                        track.distance *
+                            0.035f
+                    )
+
+        val confidenceBonus =
+            track.detection.score *
+                0.55f
+
+        val ageBonus =
+            min(
+                track.hits,
+                12,
+            ) *
+                0.025f
+
+        return track.distance +
+            centralityPenalty -
+            confidenceBonus -
+            ageBonus
+    }
+
+    private fun isRoadCandidate(
+        track: Track,
+        lane: AdasLaneGeometry,
+    ): Boolean {
+        val d =
+            track.detection
+
+        val area =
+            boxArea(
+                d
+            )
+
+        val minimumBottom =
+            max(
+                lane.horizonNorm +
+                    0.025f,
+                0.34f,
+            )
+
+        return d.bottom >
+            minimumBottom &&
+            area >
+                MIN_LEAD_BOX_AREA &&
+            track.distance <=
+                MAX_LEAD_DISTANCE_M
+    }
+
+    private fun accumulateCandidate(
+        id: Int,
+    ) {
+        if (
+            candidateLeadId ==
+            id
+        ) {
+            candidateLeadFrames++
+        } else {
+            candidateLeadId =
+                id
+
+            candidateLeadFrames =
+                1
         }
     }
+
+    private fun clearCandidate() {
+        candidateLeadId =
+            null
+
+        candidateLeadFrames =
+            0
+    }
+
+    private fun switchLead(
+        newTrack: Track,
+        reason: String,
+        nowMs: Long,
+    ) {
+        if (
+            currentLeadId ==
+            newTrack.id
+        ) {
+            clearCandidate()
+            return
+        }
+
+        currentLeadId =
+            newTrack.id
+
+        currentLeadOutsideFrames =
+            0
+
+        lastLeadSwitchMs =
+            nowMs
+
+        lastLeadSwitchReason =
+            reason
+
+        clearCandidate()
+
+        // A new target must establish its own warning state.
+        // Never carry an urgent FCW/HMW from the previous lead across a handoff.
+        fcwLevel =
+            0
+
+        fcwEvidence =
+            0
+
+        hmwEvidence =
+            0
+
+        // Lead-start baseline must also follow the new target.
+        resetLeadMove()
+    }
+
+    private fun clearCurrentLead(
+        reason: String,
+    ) {
+        currentLeadId =
+            null
+
+        currentLeadOutsideFrames =
+            0
+
+        lastLeadSwitchReason =
+            reason
+
+        clearCandidate()
+
+        fcwLevel =
+            0
+
+        fcwEvidence =
+            0
+
+        hmwEvidence =
+            0
+
+        resetLeadMove()
+    }
+
+    // -------------------------------------------------------------------------
+    // FCW / HMW / LDW
+    // -------------------------------------------------------------------------
 
     private fun computeFcwLevel(
         ttc: Float?,
@@ -589,9 +1207,7 @@ class AdasDecisionEngine {
                 speedKph >=
                     5f
 
-        if (
-            !moving
-        ) {
+        if (!moving) {
             fcwEvidence =
                 0
 
@@ -603,38 +1219,26 @@ class AdasDecisionEngine {
 
         val target =
             when {
-                ttc !=
-                    null &&
-                    ttc <=
-                        1.8f ->
+                ttc != null &&
+                    ttc <= 1.8f ->
                     4
 
-                ttc !=
-                    null &&
-                    ttc <=
-                        2.8f ->
+                ttc != null &&
+                    ttc <= 2.8f ->
                     3
 
-                ttc !=
-                    null &&
-                    ttc <=
-                        4.0f ->
+                ttc != null &&
+                    ttc <= 4.0f ->
                     2
 
-                ttc !=
-                    null &&
-                    ttc <=
-                        6.0f ->
+                ttc != null &&
+                    ttc <= 6.0f ->
                     1
 
-                leadDistance !=
-                    null &&
-                    speedKph !=
-                        null &&
-                    speedKph >=
-                        10f &&
-                    leadDistance <=
-                        4f ->
+                leadDistance != null &&
+                    speedKph != null &&
+                    speedKph >= 10f &&
+                    leadDistance <= 4f ->
                     4
 
                 else ->
@@ -684,21 +1288,14 @@ class AdasDecisionEngine {
     private fun computeHeadwayWarning(
         headway: Float?,
         speedKph: Float?,
-        nowMs: Long,
     ): Boolean {
         val bad =
-            headway !=
-                null &&
-                speedKph !=
-                    null &&
-                speedKph >=
-                    30f &&
-                headway <
-                    0.90f
+            headway != null &&
+                speedKph != null &&
+                speedKph >= 30f &&
+                headway < 0.90f
 
-        if (
-            bad
-        ) {
+        if (bad) {
             hmwEvidence =
                 (
                     hmwEvidence +
@@ -729,12 +1326,9 @@ class AdasDecisionEngine {
     ): LaneDecision {
         if (
             !lane.valid ||
-            lane.confidence <
-                0.42f ||
-            speedKph ==
-                null ||
-            speedKph <
-                35f
+            lane.confidence < 0.42f ||
+            speedKph == null ||
+            speedKph < 35f
         ) {
             ldwEvidence =
                 0
@@ -746,10 +1340,10 @@ class AdasDecisionEngine {
                 0f
 
             return LaneDecision(
-                false,
-                0,
-                null,
-                0f,
+                active = false,
+                direction = 0,
+                timeToCrossSeconds = null,
+                offsetRatio = 0f,
             )
         }
 
@@ -857,7 +1451,7 @@ class AdasDecisionEngine {
                 null
             }
 
-        val warningCandidate =
+        val candidate =
             abs(
                 offset
             ) >
@@ -867,15 +1461,12 @@ class AdasDecisionEngine {
                         offset
                     ) >
                         0.38f &&
-                        timeToCross !=
-                            null &&
+                        timeToCross != null &&
                         timeToCross <
                             1.20f
                     )
 
-        if (
-            warningCandidate
-        ) {
+        if (candidate) {
             ldwEvidence++
         } else {
             ldwEvidence =
@@ -906,12 +1497,16 @@ class AdasDecisionEngine {
             }
 
         return LaneDecision(
-            active,
-            direction,
-            timeToCross,
-            offset,
+            active = active,
+            direction = direction,
+            timeToCrossSeconds = timeToCross,
+            offsetRatio = offset,
         )
     }
+
+    // -------------------------------------------------------------------------
+    // Lead vehicle started moving at traffic light
+    // -------------------------------------------------------------------------
 
     private fun computeLeadMoved(
         lead: AdasVehicle?,
@@ -919,40 +1514,22 @@ class AdasDecisionEngine {
         nowMs: Long,
     ): Boolean {
         val stopped =
-            speedKph !=
-                null &&
-                speedKph <=
-                    3.0f
+            speedKph != null &&
+                speedKph <= 3.0f
 
-        if (
-            !stopped
-        ) {
+        if (!stopped) {
             resetLeadMove()
             return false
         }
 
-        if (
-            lead ==
-            null
-        ) {
+        if (lead == null) {
             return false
         }
 
         val area =
-            (
-                lead.detection.right -
-                    lead.detection.left
-                )
-                .coerceAtLeast(
-                    0f
-                ) *
-                (
-                    lead.detection.bottom -
-                        lead.detection.top
-                    )
-                    .coerceAtLeast(
-                        0f
-                    )
+            boxArea(
+                lead.detection
+            )
 
         if (
             stopTrackId !=
@@ -1064,6 +1641,10 @@ class AdasDecisionEngine {
             false
     }
 
+    // -------------------------------------------------------------------------
+    // Geometry / helpers
+    // -------------------------------------------------------------------------
+
     private fun estimateDistance(
         detection: Detection,
         horizonNorm: Float,
@@ -1147,8 +1728,7 @@ class AdasDecisionEngine {
 
         val combined =
             when {
-                groundDistance !=
-                    null &&
+                groundDistance != null &&
                     groundDistance.isFinite() &&
                     sizeDistance.isFinite() ->
                     groundDistance *
@@ -1156,8 +1736,7 @@ class AdasDecisionEngine {
                         sizeDistance *
                         0.28f
 
-                groundDistance !=
-                    null &&
+                groundDistance != null &&
                     groundDistance.isFinite() ->
                     groundDistance
 
@@ -1268,19 +1847,45 @@ class AdasDecisionEngine {
             )
     }
 
-    data class LaneDecision(
-        val first: Boolean,
-        val second: Int,
-        val third: Float?,
-        val fourth: Float,
-    )
+    private fun boxArea(
+        detection: Detection,
+    ): Float =
+        (
+            detection.right -
+                detection.left
+            )
+            .coerceAtLeast(
+                0f
+            ) *
+            (
+                detection.bottom -
+                    detection.top
+                )
+                .coerceAtLeast(
+                    0f
+                )
 
     companion object {
         private const val MIN_STABLE_HITS =
             3
 
-        private const val MAX_MISSES =
-            4
+        private const val TRACK_MAX_MISSES =
+            5
+
+        private const val UI_MAX_STALE_MISSES =
+            1
+
+        private const val LEAD_MAX_STALE_MISSES =
+            1
+
+        private const val DISTANCE_KEEP =
+            0.72f
+
+        private const val CLOSING_KEEP =
+            0.72f
+
+        private const val MOTION_KEEP =
+            0.68f
 
         private const val MIN_CLOSING_SPEED =
             0.70f
@@ -1290,6 +1895,49 @@ class AdasDecisionEngine {
 
         private const val VERTICAL_FOV_DEG =
             55f
+
+        private const val MAX_LEAD_DISTANCE_M =
+            95f
+
+        private const val MIN_LEAD_BOX_AREA =
+            0.00045f
+
+        private const val LEAD_LANE_CONFIDENCE =
+            0.38f
+
+        // Acquire is strict, hold is wider -> prevents rapid lead flicker at lane edges.
+        private const val LEAD_ACQUIRE_LANE_RATIO =
+            0.92f
+
+        private const val LEAD_HOLD_LANE_RATIO =
+            1.18f
+
+        private const val FALLBACK_CENTER_X =
+            0.50f
+
+        private const val FALLBACK_HALF_WIDTH =
+            0.22f
+
+        private const val LEAD_SWITCH_CONFIRM_FRAMES =
+            2
+
+        private const val OUTSIDE_CONFIRM_FRAMES =
+            2
+
+        private const val RELEASE_OUTSIDE_FRAMES =
+            3
+
+        private const val RELEASE_MISSING_FRAMES =
+            2
+
+        private const val LEAD_MIN_HOLD_MS =
+            650L
+
+        private const val CUT_IN_DISTANCE_RATIO =
+            0.88f
+
+        private const val CUT_IN_ABSOLUTE_ADVANTAGE_M =
+            2.0f
 
         private const val FCW_RISE_FRAMES =
             2
