@@ -391,6 +391,7 @@ class SupercomboDetector(modelFile: File) : Closeable {
         private const val INPUT_ELEMENTS = SINGLE_FRAME_ELEMENTS * 2
         private const val STATE_SIZE = 512
         private const val POINTS = 33
+        private const val PLAN_IDX = 0
         private const val PLAN_WIDTH = 15
         private const val PLAN_MHP_N = 5
         private const val PLAN_GROUP = 991
