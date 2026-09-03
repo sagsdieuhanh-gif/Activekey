@@ -43,3 +43,8 @@ Không đè lên app TrungKien hiện tại.
 
 ## Mục đích test
 Chạy ít nhất 10–15 phút. Nếu CLEAN V1 vẫn nhận đều thì lỗi của app cũ nằm ở các lớp tích hợp/pipeline, không phải camera hay model cơ bản.
+
+## Build fix 1.0.1
+- Bật `android.useAndroidX=true` trong project CLEAN độc lập.
+- Sửa import `AspectRatioStrategy`, `ResolutionSelector`, `ResolutionStrategy` sang package `androidx.camera.core.resolutionselector`.
+- Không thay đổi model, preprocess, decoder, threshold hay pipeline nhận diện.
