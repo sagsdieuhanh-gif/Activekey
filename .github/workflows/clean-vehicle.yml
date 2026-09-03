@@ -1,4 +1,4 @@
-name: TrungKien ADAS V2.0 FULL
+name: TrungKien ADAS V2.0.1 FULL
 
 on:
   workflow_dispatch:
@@ -73,9 +73,9 @@ jobs:
             "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  clean-vehicle-android/app/src/main/assets/ufld_culane.onnx" \
             | sha256sum -c -
 
-      - name: Build ADAS V2.0
+      - name: Build ADAS V2.0.1
         working-directory: clean-vehicle-android
-        run: gradle --no-daemon clean :app:assembleDebug
+        run: gradle --no-daemon clean :app:assembleDebug --stacktrace
 
       - name: Prepare APK
         shell: bash
@@ -88,9 +88,9 @@ jobs:
 
           cp \
             "$APK" \
-            "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN ADAS V2.0 FULL.apk"
+            "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN ADAS V2.0.1 FULL.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TrungKien-ADAS-V2.0-FULL
-          path: "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN ADAS V2.0 FULL.apk"
+          name: TrungKien-ADAS-V2.0.1-FULL
+          path: "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN ADAS V2.0.1 FULL.apk"

@@ -278,7 +278,7 @@ class MainActivity : ComponentActivity() {
                 )
 
                 text =
-                    "TRUNGKIEN ADAS V2.0 FULL\nĐANG NẠP..."
+                    "TRUNGKIEN ADAS V2.0.1.1 FULL\nĐANG NẠP..."
             }
 
         modeButton =
@@ -324,7 +324,7 @@ class MainActivity : ComponentActivity() {
                             "DRIVE"
                         }
 
-                    overlay.setDebugMode(
+                    this@MainActivity.overlay.setDebugMode(
                         debugMode
                     )
                 }
@@ -379,7 +379,7 @@ class MainActivity : ComponentActivity() {
 
     private fun loadModels() {
         status.text =
-            "TRUNGKIEN ADAS V2.0 FULL\nĐANG NẠP YOLOX + UFLD..."
+            "TRUNGKIEN ADAS V2.0.1.1 FULL\nĐANG NẠP YOLOX + UFLD..."
 
         modelExecutor.execute {
             runCatching {
@@ -740,7 +740,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         buildString {
                             append(
-                                "TRUNGKIEN ADAS V2.0 FULL • DEBUG\n"
+                                "TRUNGKIEN ADAS V2.0.1.1 FULL • DEBUG\n"
                             )
 
                             append(
@@ -868,7 +868,7 @@ class MainActivity : ComponentActivity() {
                     } else {
                         buildString {
                             append(
-                                "ADAS V2.0"
+                                "ADAS V2.0.1"
                             )
 
                             append(

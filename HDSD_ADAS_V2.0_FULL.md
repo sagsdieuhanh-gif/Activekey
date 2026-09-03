@@ -1,9 +1,18 @@
-# TRUNGKIEN ADAS V2.0 FULL
+# TRUNGKIEN ADAS V2.0.1 FULL
+
+
+## V2.0.1 — Build fix
+- Không thay đổi logic ADAS.
+- Sửa Kotlin receiver scope ở nút DRIVE/DEBUG.
+- Trong `TextView.apply`, `overlay` bị hiểu là `View.overlay`.
+- Đã đổi thành `this@MainActivity.overlay.setDebugMode(debugMode)`.
+- Package riêng: `com.trungkien.adas.v201full`.
+- Icon riêng: `V2.0.1 ADAS`.
 
 ## Cài song song
-- Application ID: `com.trungkien.adas.v20full`
-- Version: `2.0.0`
-- Icon: `V2.0 ADAS`
+- Application ID: `com.trungkien.adas.v201full`
+- Version: `2.0.1`
+- Icon: `V2.0.1 ADAS`
 - Không ghi đè V1.x.
 
 ## Nền AI

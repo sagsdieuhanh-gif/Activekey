@@ -17,8 +17,8 @@
 
     <application
         android:allowBackup="false"
-        android:icon="@drawable/ic_launcher_v20"
-        android:label="TRUNGKIEN ADAS V2.0"
+        android:icon="@drawable/ic_launcher_v201"
+        android:label="TRUNGKIEN ADAS V2.0.1"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
