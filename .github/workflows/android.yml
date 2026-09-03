@@ -1,4 +1,4 @@
-name: TrungKien V1 Road Core Stability Build
+name: TrungKien V15.7B PicoDet Vehicle Test
 
 on:
   workflow_dispatch:
@@ -8,54 +8,88 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - uses: android-actions/setup-android@v3
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
+
       - name: Install Android SDK packages
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-      - name: Stage TrungKien V1 exact SAME FP32 UFLD CULane model
+
+      - name: Stage official PicoDet-M 416
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p app/offline_models
+          curl -L --fail --retry 4 --connect-timeout 30 \
+            "https://paddledet.bj.bcebos.com/deploy/third_engine/picodet_m_416_lcnet_postprocessed.onnx" \
+            -o app/offline_models/road_core.dat
+
+          SIZE="$(stat -c%s app/offline_models/road_core.dat)"
+          test "$SIZE" -gt 1000000
+          test "$SIZE" -lt 80000000
+
+          echo "PicoDet-M416 size: $SIZE"
+          sha256sum app/offline_models/road_core.dat
+
+      - name: Stage exact FP32 UFLD CULane
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/ufld app/offline_models
-          curl -L --retry 3 --connect-timeout 30 \
+
+          curl -L --fail --retry 4 --connect-timeout 30 \
             "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/140_Ultra-Fast-Lane-Detection/resources_culane.tar.gz" \
             -o /tmp/ufld.tar.gz
+
           tar -xzf /tmp/ufld.tar.gz -C /tmp/ufld
+
           MODEL="/tmp/ufld/saved_model_culane/ultra_falst_lane_detection_culane_288x800.onnx"
           test -f "$MODEL"
+
           cp "$MODEL" app/offline_models/lane_core.dat
 
           test "$(stat -c%s app/offline_models/lane_core.dat)" = "178076232"
           echo "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  app/offline_models/lane_core.dat" | sha256sum -c -
 
-          echo "Dedicated lane model VERIFIED: $MODEL ($(du -h app/offline_models/lane_core.dat | cut -f1))"
-      - name: Build TrungKien V1 ARM64 APK
+      - name: Build TrungKien V15.7B APK
         run: gradle --no-daemon clean assembleDebug
-      - name: Verify Lane Core inside APK
+
+      - name: Verify models inside APK
+        shell: bash
         run: |
           set -euo pipefail
+
           APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
           ls -lh "$APK"
+
+          unzip -p "$APK" assets/road_core.dat > /tmp/road_core_from_apk.dat
+          cmp -s app/offline_models/road_core.dat /tmp/road_core_from_apk.dat
+          echo "PASS: PicoDet-M416 is inside APK"
 
           unzip -p "$APK" assets/lane_core.dat > /tmp/lane_core_from_apk.dat
           test "$(stat -c%s /tmp/lane_core_from_apk.dat)" = "178076232"
           echo "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  /tmp/lane_core_from_apk.dat" | sha256sum -c -
+          echo "PASS: UFLD CULane is inside APK"
 
-          echo "PASS: exact FP32 Lane Core is physically inside the APK."
-      - name: Prepare stable APK filename
+      - name: Prepare APK filename
         run: |
-          cp "app/build/outputs/apk/debug/app-debug.apk" "app/build/outputs/apk/debug/TrungKien V1.apk"
-          ls -lh "app/build/outputs/apk/debug/TrungKien V1.apk"
+          cp \
+            "app/build/outputs/apk/debug/app-debug.apk" \
+            "app/build/outputs/apk/debug/TrungKien V15.7B PicoDet.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TrungKien-V1
-          path: "app/build/outputs/apk/debug/TrungKien V1.apk"
+          name: TrungKien-V15.7B-PicoDet
+          path: "app/build/outputs/apk/debug/TrungKien V15.7B PicoDet.apk"
