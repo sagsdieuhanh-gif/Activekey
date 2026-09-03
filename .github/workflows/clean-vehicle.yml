@@ -100,7 +100,7 @@ jobs:
           APK="clean-vehicle-android/app/build/outputs/apk/release/app-release.apk"
           test -f "$APK"
 
-          apksigner verify --verbose --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
 
           cp \
             "$APK" \
