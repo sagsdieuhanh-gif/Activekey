@@ -4,11 +4,10 @@ import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * V14.1 NIGHT/NEAR-FIRST lane arbitration.
+ * V15.6 UFLD REFERENCE TEST.
  *
- * Lane Core remains useful for continuity and long-range road shape, but the lower-image CV marking
- * detector is authoritative when it has real paint evidence. This prevents a neural road-edge/kerb
- * hypothesis from overriding a clear lane marking near the vehicle.
+ * Khi UFLD CULane khóa được đủ hai lane, Lane Core là nguồn chính để đánh giá thực tế model.
+ * CV chỉ được dùng làm fallback khi UFLD chưa có cặp lane hợp lệ.
  */
 class LaneHybridFusion {
     private var lastGood: LaneState? = null
@@ -20,13 +19,8 @@ class LaneHybridFusion {
         val cvUsable = cv.takeIf { it.left != null && it.right != null && it.confidence >= cvMinConfidence }
 
         val chosen = when {
-            coreUsable != null && cvUsable != null -> fuseOrChoose(coreUsable, cvUsable)
+            coreUsable != null -> coreUsable
             cvUsable != null -> cvUsable
-            coreUsable != null -> coreUsable.copy(
-                confidence = (coreUsable.confidence * 0.78f).coerceAtMost(0.58f),
-                source = LaneSource.HYBRID_ESTIMATED,
-                isEstimated = true,
-            )
             else -> null
         }
 
