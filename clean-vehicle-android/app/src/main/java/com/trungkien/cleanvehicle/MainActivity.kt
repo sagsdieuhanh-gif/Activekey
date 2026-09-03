@@ -54,6 +54,9 @@ class MainActivity : ComponentActivity() {
             Looper.getMainLooper()
         )
 
+    private lateinit var licenseManager:
+        AdasLicenseManager
+
     private lateinit var speedProvider:
         AdasSpeedProvider
 
@@ -152,6 +155,18 @@ class MainActivity : ComponentActivity() {
             savedInstanceState
         )
 
+        licenseManager =
+            AdasLicenseManager(
+                this
+            )
+
+        if (
+            !licenseManager.hasAccess()
+        ) {
+            buildLicenseGate()
+            return
+        }
+
         speedProvider =
             AdasSpeedProvider(
                 this
@@ -181,10 +196,30 @@ class MainActivity : ComponentActivity() {
 
         buildUi()
 
+        licenseManager.startTrialClock()
+
         requestPermissionsAndStart()
 
         mainHandler.post(
             heartbeat
+        )
+    }
+
+    private fun buildLicenseGate() {
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility =
+            View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+
+        setContentView(
+            AdasLicenseGateView(
+                context = this,
+                licenseManager = licenseManager,
+                onActivated = {
+                    recreate()
+                },
+            )
         )
     }
 
@@ -278,7 +313,7 @@ class MainActivity : ComponentActivity() {
                 )
 
                 text =
-                    "TRUNGKIEN ADAS V2.1 SMART LEAD.1 FULL\nĐANG NẠP..."
+                    "TRUNGKIEN ADAS V2.2 KEY\nĐANG NẠP..."
             }
 
         modeButton =
@@ -379,7 +414,7 @@ class MainActivity : ComponentActivity() {
 
     private fun loadModels() {
         status.text =
-            "TRUNGKIEN ADAS V2.1 SMART LEAD.1 FULL\nĐANG NẠP YOLOX + UFLD..."
+            "TRUNGKIEN ADAS V2.2 KEY\nĐANG NẠP YOLOX + UFLD..."
 
         modelExecutor.execute {
             runCatching {
@@ -728,6 +763,19 @@ class MainActivity : ComponentActivity() {
     private val heartbeat =
         object : Runnable {
             override fun run() {
+                licenseManager.consumeTrialNow()
+
+                if (
+                    !licenseManager.hasAccess()
+                ) {
+                    beeper.updateFcwLevel(
+                        0
+                    )
+
+                    recreate()
+                    return
+                }
+
                 val snapshot =
                     latestSnapshot
 
@@ -740,7 +788,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         buildString {
                             append(
-                                "TRUNGKIEN ADAS V2.1 SMART LEAD.1 FULL • DEBUG\n"
+                                "TRUNGKIEN ADAS V2.2 KEY\n"
                             )
 
                             append(
@@ -868,7 +916,15 @@ class MainActivity : ComponentActivity() {
                     } else {
                         buildString {
                             append(
-                                "ADAS V2.1"
+                                "ADAS V2.2"
+                            )
+
+                            append(
+                                " • "
+                            )
+
+                            append(
+                                licenseStatusText()
                             )
 
                             append(
@@ -907,6 +963,27 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+
+    private fun licenseStatusText(): String {
+        if (
+            licenseManager.isLicensed()
+        ) {
+            return licenseManager.licenseSummary()
+        }
+
+        val totalSeconds =
+            (
+                licenseManager.remainingTrialMs() +
+                    999L
+                ) /
+                1000L
+
+        return "TRIAL %02d:%02d".format(
+            Locale.US,
+            totalSeconds / 60L,
+            totalSeconds % 60L,
+        )
+    }
 
     private fun StringBuilder.appendLeadNumbers(
         snapshot: AdasSnapshot,
@@ -991,7 +1068,34 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+
+        if (
+            ::licenseManager.isInitialized &&
+            licenseManager.hasAccess()
+        ) {
+            licenseManager.startTrialClock()
+        }
+    }
+
+    override fun onPause() {
+        if (
+            ::licenseManager.isInitialized
+        ) {
+            licenseManager.stopTrialClock()
+        }
+
+        super.onPause()
+    }
+
     override fun onDestroy() {
+        if (
+            ::licenseManager.isInitialized
+        ) {
+            licenseManager.stopTrialClock()
+        }
+
         mainHandler.removeCallbacks(
             heartbeat
         )
@@ -1002,9 +1106,17 @@ class MainActivity : ComponentActivity() {
 
         beeper.close()
 
-        voice.close()
+        if (
+            ::voice.isInitialized
+        ) {
+            voice.close()
+        }
 
-        speedProvider.stop()
+        if (
+            ::speedProvider.isInitialized
+        ) {
+            speedProvider.stop()
+        }
 
         roadDetector?.close()
 

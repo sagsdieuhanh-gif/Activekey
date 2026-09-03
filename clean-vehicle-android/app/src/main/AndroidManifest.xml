@@ -17,8 +17,8 @@
 
     <application
         android:allowBackup="false"
-        android:icon="@drawable/ic_launcher_v21"
-        android:label="TRUNGKIEN ADAS V2.1 LEAD"
+        android:icon="@drawable/ic_launcher_v22"
+        android:label="TRUNGKIEN ADAS V2.2 KEY"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
