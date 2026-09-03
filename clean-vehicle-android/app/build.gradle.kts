@@ -8,11 +8,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.trungkien.cleanvehicle.v12distance"
+        applicationId = "com.trungkien.cleanvehicle.v13ttc"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1200
-        versionName = "1.2.0"
+        versionCode = 1300
+        versionName = "1.3.0"
 
         ndk {
             abiFilters += "arm64-v8a"
