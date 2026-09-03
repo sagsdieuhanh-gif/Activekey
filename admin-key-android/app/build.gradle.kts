@@ -10,8 +10,8 @@ android {
         applicationId = "com.trungkien.licenseadmin"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1301
-        versionName = "1.0.0"
+        versionCode = 1302
+        versionName = "1.1.0"
     }
 
     buildTypes {

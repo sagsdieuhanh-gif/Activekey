@@ -17,6 +17,8 @@ import android.text.InputFilter;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -42,6 +44,8 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.Locale;
 import java.util.TimeZone;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -67,18 +71,21 @@ public class MainActivity extends Activity {
     private EditText customDateInput;
     private EditText outputKey;
     private TextView expiryInfo;
+    private ScrollView rootScroll;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().setStatusBarColor(Color.rgb(5, 8, 9));
         getWindow().setNavigationBarColor(Color.rgb(5, 8, 9));
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         setContentView(buildUi());
         refreshPrivateKeyStatus();
     }
 
     private View buildUi() {
         ScrollView scroll = new ScrollView(this);
+        rootScroll = scroll;
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(Color.rgb(5, 8, 9));
 
@@ -120,6 +127,12 @@ public class MainActivity extends Activity {
         deviceInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
         deviceInput.setFilters(new InputFilter[]{new InputFilter.AllCaps(), new InputFilter.LengthFilter(19)});
         generateCard.addView(deviceInput, fieldParams());
+
+        Button pasteDeviceButton = button("DÁN MÃ THIẾT BỊ");
+        pasteDeviceButton.setOnClickListener(v -> pasteDeviceCode());
+        LinearLayout.LayoutParams pasteDeviceParams = buttonParams();
+        pasteDeviceParams.topMargin = dp(8);
+        generateCard.addView(pasteDeviceButton, pasteDeviceParams);
 
         String[] validity = {"VĨNH VIỄN", "30 NGÀY", "90 NGÀY", "365 NGÀY", "ĐẾN NGÀY CỤ THỂ"};
         validitySpinner = new Spinner(this);
@@ -166,6 +179,8 @@ public class MainActivity extends Activity {
         outputKey.setGravity(Gravity.TOP | Gravity.START);
         outputKey.setTextIsSelectable(true);
         outputKey.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        outputKey.setShowSoftInputOnFocus(false);
+        outputKey.setCursorVisible(false);
         generateCard.addView(outputKey, fieldParams());
 
         LinearLayout actions = new LinearLayout(this);
@@ -241,6 +256,9 @@ public class MainActivity extends Activity {
     }
 
     private void generateLicense() {
+        hideKeyboard();
+        deviceInput.clearFocus();
+        customDateInput.clearFocus();
         try {
             byte[] privateDer = loadPrivateKey();
             if (privateDer == null) throw new IllegalStateException("Chưa nhập private key Admin.");
@@ -279,10 +297,56 @@ public class MainActivity extends Activity {
             outputKey.setText(license);
             expiryInfo.setText("ĐÃ TẠO · " + validityText + " · " + device + " · SERIAL " + serial);
             Arrays.fill(privateDer, (byte)0);
+            hideKeyboard();
+            if (rootScroll != null) {
+                rootScroll.post(() -> rootScroll.smoothScrollTo(0, Math.max(0, outputKey.getBottom() - dp(140))));
+            }
             toast("Đã tạo key hợp lệ.");
         } catch (Exception e) {
             showError("Không tạo được key", e.getMessage() == null ? e.toString() : e.getMessage());
         }
+    }
+
+    private void pasteDeviceCode() {
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm == null || !cm.hasPrimaryClip() || cm.getPrimaryClip() == null
+                    || cm.getPrimaryClip().getItemCount() == 0) {
+                toast("Clipboard đang trống.");
+                return;
+            }
+
+            CharSequence clipText = cm.getPrimaryClip().getItemAt(0).coerceToText(this);
+            String raw = clipText == null ? "" : clipText.toString().trim().toUpperCase(Locale.US);
+            Matcher matcher = Pattern.compile("[0-9A-F]{4}(?:-[0-9A-F]{4}){3}").matcher(raw);
+
+            if (!matcher.find()) {
+                showError("Không thấy mã thiết bị",
+                        "Clipboard không có mã dạng XXXX-XXXX-XXXX-XXXX.");
+                return;
+            }
+
+            String code = matcher.group();
+            deviceInput.setText(code);
+            deviceInput.setSelection(code.length());
+            deviceInput.clearFocus();
+            hideKeyboard();
+            toast("Đã dán mã thiết bị.");
+        } catch (Exception e) {
+            showError("Không dán được mã thiết bị",
+                    e.getMessage() == null ? e.toString() : e.getMessage());
+        }
+    }
+
+    private void hideKeyboard() {
+        try {
+            View focus = getCurrentFocus();
+            if (focus == null) focus = deviceInput;
+            InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null && focus != null) {
+                imm.hideSoftInputFromWindow(focus.getWindowToken(), 0);
+            }
+        } catch (Exception ignored) { }
     }
 
     private long parseEpochDay(String dateText) throws Exception {
