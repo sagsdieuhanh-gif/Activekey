@@ -26,6 +26,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import java.io.File
+import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
@@ -43,6 +44,9 @@ class MainActivity : ComponentActivity() {
     private val mainHandler =
         Handler(Looper.getMainLooper())
 
+    private val distanceTracker =
+        DistanceTracker()
+
     @Volatile
     private var detector: YoloXTinyDetector? = null
 
@@ -59,13 +63,13 @@ class MainActivity : ComponentActivity() {
     private var lastInferenceMs = 0f
 
     @Volatile
-    private var lastVehicleCount = 0
-
-    @Volatile
-    private var lastPersonCount = 0
+    private var lastStableVehicleCount = 0
 
     @Volatile
     private var inferenceCounter = 0L
+
+    @Volatile
+    private var frontDistanceMeters = -1f
 
     @Volatile
     private var lastLaneCompleteMs = 0L
@@ -127,30 +131,48 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun buildUi() {
-        val root = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
-        }
+        val root =
+            FrameLayout(this).apply {
+                setBackgroundColor(Color.BLACK)
+            }
 
-        previewView = PreviewView(this).apply {
-            implementationMode =
-                PreviewView.ImplementationMode.PERFORMANCE
+        previewView =
+            PreviewView(this).apply {
+                implementationMode =
+                    PreviewView.ImplementationMode.PERFORMANCE
 
-            scaleType =
-                PreviewView.ScaleType.FILL_CENTER
-        }
+                scaleType =
+                    PreviewView.ScaleType.FILL_CENTER
+            }
 
-        overlay = DetectionOverlay(this)
+        overlay =
+            DetectionOverlay(this)
 
-        status = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            setBackgroundColor(
-                Color.argb(175, 0, 0, 0)
-            )
-            textSize = 13f
-            setPadding(18, 12, 18, 12)
-            text =
-                "TRUNGKIEN CLEAN V1.1\nĐANG NẠP YOLOX + UFLD..."
-        }
+        status =
+            TextView(this).apply {
+                setTextColor(Color.WHITE)
+
+                setBackgroundColor(
+                    Color.argb(
+                        175,
+                        0,
+                        0,
+                        0,
+                    )
+                )
+
+                textSize = 13f
+
+                setPadding(
+                    18,
+                    12,
+                    18,
+                    12,
+                )
+
+                text =
+                    "TRUNGKIEN CLEAN V1.2 DISTANCE\nĐANG NẠP YOLOX + UFLD..."
+            }
 
         root.addView(
             previewView,
@@ -182,39 +204,46 @@ class MainActivity : ComponentActivity() {
 
     private fun loadModels() {
         status.text =
-            "TRUNGKIEN CLEAN V1.1\nĐANG NẠP YOLOX-TINY..."
+            "TRUNGKIEN CLEAN V1.2 DISTANCE\nĐANG NẠP YOLOX-TINY..."
 
         modelExecutor.execute {
             runCatching {
                 val roadFile =
                     copyAsset(
                         "yolox_tiny.onnx",
-                        "yolox_tiny_clean_v11.onnx",
+                        "yolox_tiny_clean_v12.onnx",
                         5_000_000L,
                     )
 
                 val road =
-                    YoloXTinyDetector(roadFile)
+                    YoloXTinyDetector(
+                        roadFile
+                    )
 
                 runOnUiThread {
                     status.text =
-                        "TRUNGKIEN CLEAN V1.1\nYOLOX OK • ĐANG NẠP UFLD..."
+                        "TRUNGKIEN CLEAN V1.2 DISTANCE\nYOLOX OK • ĐANG NẠP UFLD..."
                 }
 
                 val laneFile =
                     copyLaneAsset()
 
                 val lane =
-                    UfldLaneDetector(laneFile)
+                    UfldLaneDetector(
+                        laneFile
+                    )
 
                 road to lane
             }.onSuccess { models ->
-                detector = models.first
-                laneDetector = models.second
+                detector =
+                    models.first
+
+                laneDetector =
+                    models.second
 
                 runOnUiThread {
                     status.text =
-                        "TRUNGKIEN CLEAN V1.1\n" +
+                        "TRUNGKIEN CLEAN V1.2 DISTANCE\n" +
                             "YOLOX/${models.first.runtimeName} • " +
                             "UFLD/${models.second.runtimeName} • SẴN SÀNG"
 
@@ -236,9 +265,14 @@ class MainActivity : ComponentActivity() {
         minimumSize: Long,
     ): File {
         val target =
-            File(filesDir, targetName)
+            File(
+                filesDir,
+                targetName,
+            )
 
-        assets.open(assetName).use { input ->
+        assets.open(
+            assetName
+        ).use { input ->
             target.outputStream().use { output ->
                 input.copyTo(
                     output,
@@ -247,7 +281,10 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        require(target.length() > minimumSize) {
+        require(
+            target.length() >
+                minimumSize
+        ) {
             "$assetName quá nhỏ: ${target.length()} bytes"
         }
 
@@ -256,15 +293,22 @@ class MainActivity : ComponentActivity() {
 
     private fun copyLaneAsset(): File {
         val target =
-            File(filesDir, "ufld_culane_clean_v11.onnx")
+            File(
+                filesDir,
+                "ufld_culane_clean_v12.onnx",
+            )
 
-        if (target.exists() &&
-            target.length() == UFLD_FILE_SIZE
+        if (
+            target.exists() &&
+            target.length() ==
+                UFLD_FILE_SIZE
         ) {
             return target
         }
 
-        assets.open("ufld_culane.onnx").use { input ->
+        assets.open(
+            "ufld_culane.onnx"
+        ).use { input ->
             target.outputStream().use { output ->
                 input.copyTo(
                     output,
@@ -273,7 +317,10 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        require(target.length() == UFLD_FILE_SIZE) {
+        require(
+            target.length() ==
+                UFLD_FILE_SIZE
+        ) {
             "UFLD sai kích thước: ${target.length()}"
         }
 
@@ -282,7 +329,9 @@ class MainActivity : ComponentActivity() {
 
     private fun startCamera() {
         val providerFuture =
-            ProcessCameraProvider.getInstance(this)
+            ProcessCameraProvider.getInstance(
+                this
+            )
 
         providerFuture.addListener({
             runCatching {
@@ -346,7 +395,8 @@ class MainActivity : ComponentActivity() {
                     analysis,
                 )
 
-                cameraRunning = true
+                cameraRunning =
+                    true
             }.onFailure { error ->
                 status.text =
                     "LỖI CAMERA\n${error.message}"
@@ -355,18 +405,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun analyze(image: ImageProxy) {
-        val road = detector
-        val lane = laneDetector
+        val road =
+            detector
 
-        if (road == null || lane == null) {
+        val lane =
+            laneDetector
+
+        if (
+            road == null ||
+            lane == null
+        ) {
             image.close()
             return
         }
 
         try {
-            // Keep CLEAN V1.0.2 vehicle pipeline untouched.
             val roadResult =
-                road.detect(image)
+                road.detect(
+                    image
+                )
 
             lastInferenceCompleteMs =
                 SystemClock.elapsedRealtime()
@@ -376,29 +433,40 @@ class MainActivity : ComponentActivity() {
 
             inferenceCounter++
 
-            lastVehicleCount =
-                roadResult.detections.count {
-                    YoloXTinyDetector.isVehicle(
-                        it.classId
-                    )
-                }
+            val stable =
+                distanceTracker.update(
+                    roadResult.detections
+                )
 
-            lastPersonCount =
-                roadResult.detections.count {
-                    it.classId == 0
-                }
+            lastStableVehicleCount =
+                stable.size
+
+            frontDistanceMeters =
+                stable
+                    .firstOrNull {
+                        it.isFrontVehicle
+                    }
+                    ?.distanceMeters
+                    ?: -1f
 
             runOnUiThread {
-                overlay.update(roadResult)
+                overlay.updateRoad(
+                    roadResult,
+                    stable,
+                )
             }
 
             analysisCounter++
 
-            // Pure lane test every second analyzed frame.
-            // This avoids lane inference starving the vehicle detector.
-            if (analysisCounter % 2L == 0L) {
+            if (
+                analysisCounter %
+                    2L ==
+                0L
+            ) {
                 val laneResult =
-                    lane.detect(image)
+                    lane.detect(
+                        image
+                    )
 
                 lastLaneCompleteMs =
                     SystemClock.elapsedRealtime()
@@ -434,14 +502,24 @@ class MainActivity : ComponentActivity() {
     private val heartbeat =
         object : Runnable {
             override fun run() {
-                val road = detector
-                val lane = laneDetector
+                val road =
+                    detector
+
+                val lane =
+                    laneDetector
+
                 val now =
                     SystemClock.elapsedRealtime()
 
-                if (road != null && lane != null) {
+                if (
+                    road != null &&
+                    lane != null
+                ) {
                     val roadAge =
-                        if (lastInferenceCompleteMs == 0L) {
+                        if (
+                            lastInferenceCompleteMs ==
+                            0L
+                        ) {
                             Long.MAX_VALUE
                         } else {
                             now -
@@ -449,7 +527,10 @@ class MainActivity : ComponentActivity() {
                         }
 
                     val laneAge =
-                        if (lastLaneCompleteMs == 0L) {
+                        if (
+                            lastLaneCompleteMs ==
+                            0L
+                        ) {
                             Long.MAX_VALUE
                         } else {
                             now -
@@ -461,10 +542,12 @@ class MainActivity : ComponentActivity() {
                             !cameraRunning ->
                                 "CAMERA..."
 
-                            lastInferenceCompleteMs == 0L ->
+                            lastInferenceCompleteMs ==
+                                0L ->
                                 "ROAD..."
 
-                            roadAge > 3_000L ->
+                            roadAge >
+                                3_000L ->
                                 "⚠ ROAD STALL"
 
                             else ->
@@ -473,10 +556,12 @@ class MainActivity : ComponentActivity() {
 
                     val laneState =
                         when {
-                            lastLaneCompleteMs == 0L ->
+                            lastLaneCompleteMs ==
+                                0L ->
                                 "LANE..."
 
-                            laneAge > 4_000L ->
+                            laneAge >
+                                4_000L ->
                                 "⚠ LANE STALL"
 
                             else ->
@@ -486,44 +571,73 @@ class MainActivity : ComponentActivity() {
                     status.text =
                         buildString {
                             append(
-                                "TRUNGKIEN CLEAN V1.1\n"
+                                "TRUNGKIEN CLEAN V1.2 DISTANCE\n"
                             )
 
                             append(
                                 "YOLOX/"
                             )
+
                             append(
                                 road.runtimeName
                             )
+
                             append(" • ")
                             append(roadState)
 
-                            append("\nXE ")
                             append(
-                                lastVehicleCount
+                                "\nXE ỔN ĐỊNH "
                             )
-                            append(" • NGƯỜI ")
+
                             append(
-                                lastPersonCount
+                                lastStableVehicleCount
                             )
+
                             append(" • ")
+
                             append(
                                 lastInferenceMs
                                     .roundToInt()
                             )
-                            append(" ms • #")
+
+                            append(
+                                " ms • #"
+                            )
+
                             append(
                                 inferenceCounter
                             )
 
-                            append("\nUFLD/")
+                            if (
+                                frontDistanceMeters >
+                                0f
+                            ) {
+                                append(
+                                    " • FRONT ≈ "
+                                )
+
+                                append(
+                                    String.format(
+                                        Locale.US,
+                                        "%.1f m",
+                                        frontDistanceMeters,
+                                    )
+                                )
+                            }
+
+                            append(
+                                "\nUFLD/"
+                            )
+
                             append(
                                 lane.runtimeName
                             )
+
                             append(" • ")
                             append(laneState)
 
                             append(" • L ")
+
                             append(
                                 (
                                     leftLaneConfidence *
@@ -531,7 +645,9 @@ class MainActivity : ComponentActivity() {
                                     )
                                     .roundToInt()
                             )
+
                             append("% R ")
+
                             append(
                                 (
                                     rightLaneConfidence *
@@ -539,12 +655,18 @@ class MainActivity : ComponentActivity() {
                                     )
                                     .roundToInt()
                             )
+
                             append("% • ")
+
                             append(
                                 lastLaneInferenceMs
                                     .roundToInt()
                             )
-                            append(" ms • #")
+
+                            append(
+                                " ms • #"
+                            )
+
                             append(
                                 laneInferenceCounter
                             )

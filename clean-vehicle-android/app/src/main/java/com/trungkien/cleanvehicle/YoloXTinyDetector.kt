@@ -239,7 +239,7 @@ class YoloXTinyDetector(
         for (i in 0 until GRID_COUNT) {
             val base = i * ATTRS
             val objectness = output[base + 4]
-            if (!objectness.isFinite() || objectness < 0.04f) continue
+            if (!objectness.isFinite() || objectness < 0.06f) continue
 
             var bestClass = -1
             var bestScore = 0f
@@ -255,10 +255,10 @@ class YoloXTinyDetector(
             if (bestClass < 0) continue
 
             val threshold = when (bestClass) {
-                2, 5, 7 -> 0.10f
-                3, 1 -> 0.13f
-                0 -> 0.18f
-                else -> 0.15f
+                2, 5, 7 -> 0.22f
+                3, 1 -> 0.28f
+                0 -> 0.35f
+                else -> 0.25f
             }
 
             if (bestScore < threshold) continue

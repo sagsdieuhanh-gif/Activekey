@@ -7,12 +7,19 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.view.View
+import java.util.Locale
 
 class DetectionOverlay(context: Context) : View(context) {
-    private val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val stableBoxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 5f
         color = Color.rgb(0, 255, 120)
+    }
+
+    private val frontBoxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 8f
+        color = Color.rgb(255, 80, 50)
     }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -21,9 +28,15 @@ class DetectionOverlay(context: Context) : View(context) {
         color = Color.WHITE
     }
 
+    private val distancePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        textSize = 34f
+        color = Color.WHITE
+    }
+
     private val textBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.argb(180, 0, 0, 0)
+        color = Color.argb(195, 0, 0, 0)
     }
 
     private val egoLanePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -43,7 +56,8 @@ class DetectionOverlay(context: Context) : View(context) {
     }
 
     @Volatile
-    private var detections: List<Detection> = emptyList()
+    private var distanceDetections: List<DistanceDetection> =
+        emptyList()
 
     @Volatile
     private var roadSourceWidth: Int = 4
@@ -54,8 +68,11 @@ class DetectionOverlay(context: Context) : View(context) {
     @Volatile
     private var laneResult: LaneResult? = null
 
-    fun update(result: DetectorResult) {
-        detections = result.detections
+    fun updateRoad(
+        result: DetectorResult,
+        stable: List<DistanceDetection>,
+    ) {
+        distanceDetections = stable
         roadSourceWidth = result.sourceWidth
         roadSourceHeight = result.sourceHeight
         invalidate()
@@ -67,16 +84,15 @@ class DetectionOverlay(context: Context) : View(context) {
     }
 
     fun clear() {
-        detections = emptyList()
+        distanceDetections = emptyList()
         laneResult = null
         invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-
         drawLanes(canvas)
-        drawDetections(canvas)
+        drawRoadUsers(canvas)
     }
 
     private fun drawLanes(canvas: Canvas) {
@@ -88,10 +104,7 @@ class DetectionOverlay(context: Context) : View(context) {
 
         for (laneIndex in result.lanes.indices) {
             val points = result.lanes[laneIndex]
-
-            if (points.size < 3) {
-                continue
-            }
+            if (points.size < 3) continue
 
             val path = Path()
             var started = false
@@ -117,67 +130,131 @@ class DetectionOverlay(context: Context) : View(context) {
                 }
             }
 
-            val paint =
+            canvas.drawPath(
+                path,
                 if (laneIndex == 1 || laneIndex == 2) {
                     egoLanePaint
                 } else {
                     outerLanePaint
-                }
-
-            canvas.drawPath(path, paint)
+                },
+            )
         }
     }
 
-    private fun drawDetections(canvas: Canvas) {
-        val sw = roadSourceWidth.toFloat().coerceAtLeast(1f)
-        val sh = roadSourceHeight.toFloat().coerceAtLeast(1f)
+    private fun drawRoadUsers(canvas: Canvas) {
+        val sw =
+            roadSourceWidth.toFloat().coerceAtLeast(1f)
+
+        val sh =
+            roadSourceHeight.toFloat().coerceAtLeast(1f)
+
         val transform = transformFor(
             roadSourceWidth,
             roadSourceHeight,
         )
 
-        for (d in detections) {
+        for (item in distanceDetections) {
+            val d = item.detection
+
             val left =
                 transform.offsetX +
-                    d.left * sw * transform.scale
+                    d.left *
+                    sw *
+                    transform.scale
 
             val top =
                 transform.offsetY +
-                    d.top * sh * transform.scale
+                    d.top *
+                    sh *
+                    transform.scale
 
             val right =
                 transform.offsetX +
-                    d.right * sw * transform.scale
+                    d.right *
+                    sw *
+                    transform.scale
 
             val bottom =
                 transform.offsetY +
-                    d.bottom * sh * transform.scale
+                    d.bottom *
+                    sh *
+                    transform.scale
 
-            val rect = RectF(left, top, right, bottom)
-            canvas.drawRect(rect, boxPaint)
+            val rect =
+                RectF(
+                    left,
+                    top,
+                    right,
+                    bottom,
+                )
+
+            canvas.drawRect(
+                rect,
+                if (item.isFrontVehicle) {
+                    frontBoxPaint
+                } else {
+                    stableBoxPaint
+                },
+            )
 
             val label =
-                "${YoloXTinyDetector.label(d.classId)} ${(d.score * 100f).toInt()}%"
+                if (item.isFrontVehicle) {
+                    "XE PHÍA TRƯỚC"
+                } else {
+                    YoloXTinyDetector.label(
+                        d.classId
+                    )
+                }
 
-            val textWidth =
-                textPaint.measureText(label)
+            val distance =
+                "≈ " +
+                    String.format(
+                        Locale.US,
+                        "%.1f m",
+                        item.distanceMeters,
+                    )
 
-            val textTop =
-                (top - 36f).coerceAtLeast(0f)
+            val confidence =
+                "${(d.score * 100f).toInt()}%"
+
+            val line1 =
+                "$label $confidence"
+
+            val line2 =
+                distance
+
+            val width1 =
+                textPaint.measureText(line1)
+
+            val width2 =
+                distancePaint.measureText(line2)
+
+            val boxWidth =
+                maxOf(width1, width2) + 18f
+
+            val labelTop =
+                (top - 79f).coerceAtLeast(0f)
 
             canvas.drawRect(
                 left,
-                textTop,
-                left + textWidth + 16f,
-                textTop + 38f,
+                labelTop,
+                left + boxWidth,
+                labelTop + 77f,
                 textBgPaint,
             )
 
             canvas.drawText(
-                label,
+                line1,
                 left + 8f,
-                textTop + 29f,
+                labelTop + 30f,
                 textPaint,
+            )
+
+            canvas.drawText(
+                line2,
+                left + 8f,
+                labelTop + 68f,
+                distancePaint,
             )
         }
     }
@@ -198,17 +275,24 @@ class DetectionOverlay(context: Context) : View(context) {
         val sh =
             sourceHeight.toFloat().coerceAtLeast(1f)
 
-        // PreviewView is FILL_CENTER.
         val scale =
-            maxOf(width / sw, height / sh)
+            maxOf(
+                width / sw,
+                height / sh,
+            )
 
-        val renderedWidth = sw * scale
-        val renderedHeight = sh * scale
+        val renderedWidth =
+            sw * scale
+
+        val renderedHeight =
+            sh * scale
 
         return ScreenTransform(
             scale = scale,
-            offsetX = (width - renderedWidth) * 0.5f,
-            offsetY = (height - renderedHeight) * 0.5f,
+            offsetX =
+                (width - renderedWidth) * 0.5f,
+            offsetY =
+                (height - renderedHeight) * 0.5f,
         )
     }
 }
