@@ -193,11 +193,11 @@ class RoadSenseEngine private constructor(
             GRID_STRIDE = FloatArray(ss.size) { ss[it] }
         }
 
-        fun create(modelFile: File): RoadSenseEngine {
+        fun create(modelFile: File, preferStable: Boolean = false): RoadSenseEngine {
             require(modelFile.exists()) { "Road Core package file not found: ${modelFile.absolutePath}" }
             val env = OrtEnvironment.getEnvironment("DistanceGuard-RoadUsers")
 
-            if (Build.VERSION.SDK_INT >= 27) {
+            if (!preferStable && Build.VERSION.SDK_INT >= 27) {
                 runCatching {
                     val opts = OrtSession.SessionOptions()
                     try {
@@ -215,7 +215,7 @@ class RoadSenseEngine private constructor(
                 try {
                     opts.addXnnpack(mapOf("intra_op_num_threads" to "2"))
                     val s = env.createSession(modelFile.absolutePath, opts)
-                    return RoadSenseEngine(env, s, "XNNPACK")
+                    return RoadSenseEngine(env, s, if (preferStable) "XNNPACK-STABLE" else "XNNPACK")
                 } finally {
                     opts.close()
                 }

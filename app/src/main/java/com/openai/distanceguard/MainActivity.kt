@@ -156,6 +156,9 @@ class MainActivity : ComponentActivity() {
     private var lastPedestrianMeasurementNs = 0L
     @Volatile private var visionErrorDetail: String? = null
     private var consecutiveVisionFailures = 0
+    private val visionRecoveryPending = AtomicBoolean(false)
+    private var visionRecoveryAttempt = 0
+    private var visionRecoveryCount = 0
     @Volatile private var lastGpsSnapshot = GpsSpeedSnapshot(status = GpsStatus.SEARCHING)
     @Volatile private var lastAutoCalibrationState = AutoCalibrationState.CALIBRATING
     private var lastCalibrationPersistNs = 0L
@@ -935,6 +938,8 @@ class MainActivity : ComponentActivity() {
             append("Xe: ").append(modelStatus.text).append("\n")
             append("Làn: ").append(laneModelStatus.text).append("\n")
             append("Vật thể: ").append(pedestrianStatus.text).append("\n")
+            append("ROAD runtime: ").append(visionEngine?.acceleratorName ?: "đang khôi phục")
+                .append(" • tự khôi phục ").append(visionRecoveryCount).append(" lần\n")
             append("AUTO góc: ").append(lastAutoCalibrationState.name).append("\n")
             append("Làn/chân trời: ").append(
                 if (manualLaneCalibration.isCompatible(preprocessor.displayAspect)) "AUTO + TINH CHỈNH TAY" else "AUTO"
@@ -1011,33 +1016,67 @@ class MainActivity : ComponentActivity() {
         summaryStatus.setTextColor(if (licenseGate.status().allowed) Color.WHITE else Color.rgb(255, 193, 7))
     }
 
-    private fun loadVisionCore() {
+    private fun loadVisionCore(preferStable: Boolean = false) {
+        if (!licenseGate.status().allowed) return
         visionErrorDetail = null
-        consecutiveVisionFailures = 0
-        pedestrianStatus.text = "ROAD USERS: đang nạp ROAD CORE…"
+        pedestrianStatus.text = if (preferStable) "ROAD USERS: đang tự khôi phục…" else "ROAD USERS: đang nạp ROAD CORE…"
         refreshCompactStatus()
         roadUserExecutor.execute {
             val created = BundledModelStores.roadUsers(this).mapCatching { file ->
-                RoadSenseEngine.create(file)
+                RoadSenseEngine.create(file, preferStable = preferStable)
             }
             runOnUiThread {
-                created.onSuccess {
-                    visionEngine?.close()
-                    visionEngine = it
+                created.onSuccess { engine ->
+                    val oldEngine = visionEngine
+                    visionEngine = engine
+                    if (oldEngine != null && oldEngine !== engine) runCatching { oldEngine.close() }
+                    consecutiveVisionFailures = 0
                     visionErrorDetail = null
-                    modelStatus.text = "XE PHÍA TRƯỚC: ROAD CORE ${it.acceleratorName} • sẵn sàng"
-                    pedestrianStatus.text = "ROAD USERS: ${it.acceleratorName} • sẵn sàng"
+                    visionRecoveryPending.set(false)
+                    visionRecoveryAttempt = 0
+                    if (preferStable) visionRecoveryCount++
+                    roadUserTemporalFilter.reset()
+                    targetSelector.reset()
+                    vehicleRangeFusion.reset()
+                    tracker.reset()
+                    latestRoadUsers.set(null)
+                    lastRangeTrackId = -1
+                    lastVehicleMeasurementNs = 0L
+                    modelStatus.text = "XE PHÍA TRƯỚC: ROAD CORE ${engine.acceleratorName} • sẵn sàng"
+                    pedestrianStatus.text = "ROAD USERS: ${engine.acceleratorName} • sẵn sàng"
+                    refreshCompactStatus()
                 }.onFailure { error ->
-                    visionEngine?.close()
+                    runCatching { visionEngine?.close() }
                     visionEngine = null
+                    latestRoadUsers.set(null)
+                    roadUserTemporalFilter.reset()
+                    targetSelector.reset()
                     visionErrorDetail = "${error.javaClass.simpleName}: ${error.message ?: "không rõ nguyên nhân"}"
-                    modelStatus.text = "XE PHÍA TRƯỚC: ROAD CORE chưa sẵn sàng"
-                    pedestrianStatus.text = "ROAD USERS: CORE offline chưa sẵn sàng"
-                    Toast.makeText(this, "ROAD CORE chưa sẵn sàng; nhận diện làn dự phòng vẫn hoạt động.", Toast.LENGTH_SHORT).show()
+                    modelStatus.text = "ROAD CORE: đang chờ tự khôi phục"
+                    pedestrianStatus.text = "ROAD USERS: đang chờ tự khôi phục"
+                    visionRecoveryPending.set(false)
+                    refreshCompactStatus()
+                    scheduleVisionRecovery("khởi tạo ROAD CORE lỗi")
                 }
-                refreshCompactStatus()
             }
         }
+    }
+
+    private fun scheduleVisionRecovery(reason: String) {
+        if (!licenseGate.status().allowed || visionEngine != null) return
+        if (!visionRecoveryPending.compareAndSet(false, true)) return
+        visionRecoveryAttempt = (visionRecoveryAttempt + 1).coerceAtMost(6)
+        val delayMs = (1_500L * visionRecoveryAttempt).coerceAtMost(8_000L)
+        visionErrorDetail = "$reason • tự thử lại sau ${delayMs / 1000f}s"
+        mainHandler.postDelayed({
+            visionRecoveryPending.set(false)
+            if (licenseGate.status().allowed && visionEngine == null) {
+                modelStatus.text = "ROAD CORE: đang tự khởi động lại"
+                pedestrianStatus.text = "ROAD USERS: đang tự khởi động lại"
+                refreshCompactStatus()
+                loadVisionCore(preferStable = true)
+            }
+        }, delayMs)
     }
 
     private fun loadLaneCore() {
@@ -1288,14 +1327,23 @@ class MainActivity : ComponentActivity() {
                     } catch (t: Throwable) {
                         consecutiveVisionFailures++
                         visionErrorDetail = "${t.javaClass.simpleName}: ${t.message ?: "lỗi ROAD CORE"}"
-                        if (consecutiveVisionFailures >= 3) {
-                            runCatching { roadUserDetector.close() }
-                            visionEngine = null
+                        if (consecutiveVisionFailures >= 2) {
+                            if (visionEngine === roadUserDetector) {
+                                runCatching { roadUserDetector.close() }
+                                visionEngine = null
+                            }
                             latestRoadUsers.set(null)
+                            roadUserTemporalFilter.reset()
+                            targetSelector.reset()
+                            vehicleRangeFusion.reset()
+                            tracker.reset()
+                            lastRangeTrackId = -1
+                            lastVehicleMeasurementNs = 0L
                             runOnUiThread {
-                                modelStatus.text = "ROAD CORE: tạm dừng • xem ⚙"
-                                pedestrianStatus.text = "ROAD USERS: tạm dừng • xem ⚙"
+                                modelStatus.text = "ROAD CORE: lỗi tạm thời • đang tự khôi phục"
+                                pedestrianStatus.text = "ROAD USERS: đang tự khôi phục"
                                 refreshCompactStatus()
+                                scheduleVisionRecovery("ROAD CORE lỗi khi đang chạy")
                             }
                         }
                     } finally {

@@ -72,30 +72,30 @@ class ThermalGuard(
 
         val base = when (mode) {
             Mode.NORMAL -> Profile(
-                frameIntervalNs = 62_000_000L,
-                visionIntervalNs = 155_000_000L,
-                laneIntervalNs = 135_000_000L,
+                frameIntervalNs = 70_000_000L,
+                visionIntervalNs = 185_000_000L,
+                laneIntervalNs = 160_000_000L,
                 uiIntervalMs = 66L,
                 signIntervalNs = 340_000_000L,
             )
             Mode.BALANCED -> Profile(
-                frameIntervalNs = 80_000_000L,
-                visionIntervalNs = 220_000_000L,
-                laneIntervalNs = 200_000_000L,
+                frameIntervalNs = 90_000_000L,
+                visionIntervalNs = 260_000_000L,
+                laneIntervalNs = 230_000_000L,
                 uiIntervalMs = 95L,
                 signIntervalNs = 520_000_000L,
             )
             Mode.HOT -> Profile(
-                frameIntervalNs = 108_000_000L,
-                visionIntervalNs = 320_000_000L,
-                laneIntervalNs = 300_000_000L,
+                frameIntervalNs = 120_000_000L,
+                visionIntervalNs = 380_000_000L,
+                laneIntervalNs = 340_000_000L,
                 uiIntervalMs = 140L,
                 signIntervalNs = 780_000_000L,
             )
             Mode.VERY_HOT -> Profile(
-                frameIntervalNs = 165_000_000L,
-                visionIntervalNs = 480_000_000L,
-                laneIntervalNs = 470_000_000L,
+                frameIntervalNs = 180_000_000L,
+                visionIntervalNs = 560_000_000L,
+                laneIntervalNs = 520_000_000L,
                 uiIntervalMs = 220L,
                 signIntervalNs = 1_250_000_000L,
             )

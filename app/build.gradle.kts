@@ -25,8 +25,8 @@ android {
         }
         // V14.1 NIGHT/CENTER FIX: automatic low-light enhancement, night lane near-first,
         // centre-fallback lead acquisition, low-noise side cut-in watch and licensed access.
-        versionCode = 1540
-        versionName = "15.4.0"
+        versionCode = 1550
+        versionName = "15.5.0"
     }
 
     buildTypes {
@@ -101,7 +101,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
                 connectTimeout = 30_000
                 readTimeout = 120_000
                 instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "TrungKien-V1-ManualLane/15.4.0")
+                setRequestProperty("User-Agent", "TrungKien-V1-RoadCoreStability/15.5.0")
                 setRequestProperty("Accept", "application/octet-stream")
             }
             try {

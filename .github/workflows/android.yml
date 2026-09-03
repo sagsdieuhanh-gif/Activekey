@@ -1,4 +1,4 @@
-name: TrungKien V1 Manual Lane Horizon Build
+name: TrungKien V1 Road Core Stability Build
 
 on:
   workflow_dispatch:

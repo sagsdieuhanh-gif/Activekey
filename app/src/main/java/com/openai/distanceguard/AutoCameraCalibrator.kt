@@ -116,18 +116,18 @@ class AutoCameraCalibrator(
         val initialWindow = timestampNs - firstRefineNs < 4_000_000_000L
 
         // IMU seeds the fixed mount orientation quickly during the first seconds.
-        if (sensorPitch != null) {
-            val alpha = if (initialWindow) 0.16f else 0.006f
-            filteredPitch = blendAngle(filteredPitch, sensorPitch, alpha).coerceIn(-5f, 28f)
+        // V15.5: learn the fixed phone mount only during the initial window.
+        // Road slope/braking while driving must not slowly rewrite mount geometry.
+        if (sensorPitch != null && initialWindow) {
+            filteredPitch = blendAngle(filteredPitch, sensorPitch, 0.16f).coerceIn(-5f, 28f)
         }
-        if (sensorRoll != null) {
-            val alpha = if (initialWindow) 0.18f else 0.004f
-            filteredRoll = blendAngle(filteredRoll, sensorRoll, alpha).coerceIn(-20f, 20f)
+        if (sensorRoll != null && initialWindow) {
+            filteredRoll = blendAngle(filteredRoll, sensorRoll, 0.18f).coerceIn(-20f, 20f)
         }
 
         // Image vanishing point is relative to the ROAD, which is the better pitch source once lane evidence exists.
         val horizon = imageLane
-            ?.takeIf { it.left != null && it.right != null && it.confidence >= 0.42f }
+            ?.takeIf { it.left != null && it.right != null && it.confidence >= 0.50f }
             ?.let { vanishingPoint(it) }
             ?.let { unrollPoint(it.first, it.second, filteredRoll) }
             ?.takeIf { (_, y) -> y in 0.05f..0.72f }
@@ -141,7 +141,7 @@ class AutoCameraCalibrator(
                 .takeIf { abs(it) <= 22f }
         }
         if (lanePitch != null) {
-            val alpha = if (initialWindow) 0.22f else 0.055f
+            val alpha = if (initialWindow) 0.22f else 0.015f
             // Reject a single impossible jump; several future good frames can still move the filter gradually.
             if (abs(lanePitch - filteredPitch) <= 12f || initialWindow) {
                 filteredPitch = blendAngle(filteredPitch, lanePitch, alpha).coerceIn(-3f, 24f)
@@ -149,7 +149,7 @@ class AutoCameraCalibrator(
             }
         }
         if (laneYaw != null) {
-            val alpha = if (initialWindow) 0.18f else 0.035f
+            val alpha = if (initialWindow) 0.18f else 0.010f
             filteredYaw = blendAngle(filteredYaw, laneYaw, alpha).coerceIn(-18f, 18f)
             lastGoodLaneNs = timestampNs
         }
