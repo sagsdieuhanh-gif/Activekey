@@ -9,257 +9,770 @@ import android.graphics.RectF
 import android.view.View
 import java.util.Locale
 
-class DetectionOverlay(context: Context) : View(context) {
-    private val stableBoxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 5f
-        color = Color.rgb(0, 255, 120)
-    }
+class DetectionOverlay(
+    context: Context,
+) : View(context) {
+    private val normalBox =
+        Paint(
+            Paint.ANTI_ALIAS_FLAG
+        ).apply {
+            style =
+                Paint.Style.STROKE
 
-    private val frontBoxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 8f
-        color = Color.rgb(255, 80, 50)
-    }
+            strokeWidth =
+                5f
 
-    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        textSize = 30f
-        color = Color.WHITE
-    }
+            color =
+                Color.rgb(
+                    0,
+                    255,
+                    120,
+                )
+        }
 
-    private val distancePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        textSize = 34f
-        color = Color.WHITE
-    }
+    private val leadBox =
+        Paint(
+            Paint.ANTI_ALIAS_FLAG
+        ).apply {
+            style =
+                Paint.Style.STROKE
 
-    private val bannerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        textSize = 46f
-        color = Color.WHITE
-    }
+            strokeWidth =
+                8f
 
-    private val textBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = Color.argb(195, 0, 0, 0)
-    }
+            color =
+                Color.rgb(
+                    255,
+                    80,
+                    50,
+                )
+        }
 
-    private val bannerBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = Color.argb(220, 0, 135, 90)
-    }
+    private val egoLanePaint =
+        Paint(
+            Paint.ANTI_ALIAS_FLAG
+        ).apply {
+            style =
+                Paint.Style.STROKE
 
-    private val hoodPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 3f
-        color = Color.argb(210, 255, 120, 40)
-    }
+            strokeWidth =
+                8f
 
-    private val egoLanePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 8f
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-        color = Color.rgb(255, 230, 0)
-    }
+            strokeCap =
+                Paint.Cap.ROUND
 
-    private val outerLanePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 4f
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-        color = Color.rgb(0, 220, 255)
-    }
+            strokeJoin =
+                Paint.Join.ROUND
+
+            color =
+                Color.rgb(
+                    255,
+                    230,
+                    0,
+                )
+        }
+
+    private val outerLanePaint =
+        Paint(
+            Paint.ANTI_ALIAS_FLAG
+        ).apply {
+            style =
+                Paint.Style.STROKE
+
+            strokeWidth =
+                4f
+
+            strokeCap =
+                Paint.Cap.ROUND
+
+            strokeJoin =
+                Paint.Join.ROUND
+
+            color =
+                Color.rgb(
+                    0,
+                    220,
+                    255,
+                )
+        }
+
+    private val textPaint =
+        Paint(
+            Paint.ANTI_ALIAS_FLAG
+        ).apply {
+            style =
+                Paint.Style.FILL
+
+            textSize =
+                29f
+
+            color =
+                Color.WHITE
+        }
+
+    private val bigPaint =
+        Paint(
+            Paint.ANTI_ALIAS_FLAG
+        ).apply {
+            style =
+                Paint.Style.FILL
+
+            textSize =
+                46f
+
+            color =
+                Color.WHITE
+        }
+
+    private val textBg =
+        Paint(
+            Paint.ANTI_ALIAS_FLAG
+        ).apply {
+            style =
+                Paint.Style.FILL
+
+            color =
+                Color.argb(
+                    195,
+                    0,
+                    0,
+                    0,
+                )
+        }
+
+    private val dangerBg =
+        Paint(
+            Paint.ANTI_ALIAS_FLAG
+        ).apply {
+            style =
+                Paint.Style.FILL
+
+            color =
+                Color.argb(
+                    220,
+                    180,
+                    25,
+                    15,
+                )
+        }
+
+    private val infoBg =
+        Paint(
+            Paint.ANTI_ALIAS_FLAG
+        ).apply {
+            style =
+                Paint.Style.FILL
+
+            color =
+                Color.argb(
+                    220,
+                    0,
+                    130,
+                    88,
+                )
+        }
+
+    private val hoodPaint =
+        Paint(
+            Paint.ANTI_ALIAS_FLAG
+        ).apply {
+            style =
+                Paint.Style.STROKE
+
+            strokeWidth =
+                3f
+
+            color =
+                Color.argb(
+                    210,
+                    255,
+                    120,
+                    40,
+                )
+        }
 
     @Volatile
-    private var distanceDetections: List<DistanceDetection> = emptyList()
+    private var snapshot =
+        AdasSnapshot()
 
     @Volatile
-    private var ttcState = TtcState.empty()
+    private var laneResult:
+        LaneResult? =
+        null
 
     @Volatile
-    private var laneResult: LaneResult? = null
+    private var sourceWidth =
+        4
 
     @Volatile
-    private var calibration = CameraCalibrationState()
+    private var sourceHeight =
+        3
 
     @Volatile
-    private var leadMovedUntilMs = 0L
+    private var debugMode =
+        false
 
     @Volatile
-    private var roadSourceWidth = 4
-
-    @Volatile
-    private var roadSourceHeight = 3
+    private var leadMovedUntil =
+        0L
 
     fun updateRoad(
         result: DetectorResult,
-        stable: List<DistanceDetection>,
-        ttc: TtcState,
-        calibrationState: CameraCalibrationState,
-        leadMoveState: LeadMoveState,
+        newSnapshot: AdasSnapshot,
     ) {
-        distanceDetections = stable
-        ttcState = ttc
-        calibration = calibrationState
-        leadMovedUntilMs = leadMoveState.messageUntilMs
-        roadSourceWidth = result.sourceWidth
-        roadSourceHeight = result.sourceHeight
+        sourceWidth =
+            result.sourceWidth
+
+        sourceHeight =
+            result.sourceHeight
+
+        snapshot =
+            newSnapshot
+
+        if (
+            newSnapshot.warnings.leadMovedEvent
+        ) {
+            leadMovedUntil =
+                android.os.SystemClock.elapsedRealtime() +
+                    3_000L
+        }
+
         invalidate()
     }
 
-    fun updateLane(result: LaneResult) {
-        laneResult = result
+    fun updateLane(
+        result: LaneResult,
+    ) {
+        laneResult =
+            result
+
         invalidate()
     }
 
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        drawHoodMask(canvas)
-        drawLanes(canvas)
-        drawRoadUsers(canvas)
-        drawLeadMoveBanner(canvas)
-        drawTtcBanner(canvas)
+    fun setDebugMode(
+        enabled: Boolean,
+    ) {
+        debugMode =
+            enabled
+
+        invalidate()
     }
 
-    private fun drawHoodMask(canvas: Canvas) {
-        val y = height * calibration.hoodTopNorm
-        canvas.drawLine(0f, y, width.toFloat(), y, hoodPaint)
-    }
-
-    private fun drawLeadMoveBanner(canvas: Canvas) {
-        if (android.os.SystemClock.elapsedRealtime() >= leadMovedUntilMs) return
-
-        val text = "XE PHÍA TRƯỚC ĐÃ DI CHUYỂN"
-        val w = bannerPaint.measureText(text) + 46f
-        val left = (width - w) * 0.5f
-        val top = 34f
-
-        canvas.drawRoundRect(
-            RectF(left, top, left + w, top + 76f),
-            18f,
-            18f,
-            bannerBgPaint,
+    override fun onDraw(
+        canvas: Canvas,
+    ) {
+        super.onDraw(
+            canvas
         )
 
-        canvas.drawText(text, left + 23f, top + 55f, bannerPaint)
-    }
-
-    private fun drawTtcBanner(canvas: Canvas) {
-        val ttc = ttcState.ttcSeconds ?: return
-        if (ttcState.riskLevel <= 0) return
-
-        val text = "TTC ≈ " + String.format(Locale.US, "%.1f s", ttc)
-        val w = bannerPaint.measureText(text) + 40f
-        val left = (width - w) * 0.5f
-        val top = height - 102f
-
-        canvas.drawRoundRect(
-            RectF(left, top, left + w, top + 78f),
-            18f,
-            18f,
-            textBgPaint,
+        drawLanes(
+            canvas
         )
 
-        canvas.drawText(text, left + 20f, top + 57f, bannerPaint)
+        if (
+            debugMode
+        ) {
+            drawDebugGeometry(
+                canvas
+            )
+        }
+
+        drawVehicles(
+            canvas
+        )
+
+        drawWarnings(
+            canvas
+        )
     }
 
-    private fun drawLanes(canvas: Canvas) {
-        val result = laneResult ?: return
-        val tr = transformFor(result.sourceWidth, result.sourceHeight)
+    private fun drawLanes(
+        canvas: Canvas,
+    ) {
+        val result =
+            laneResult ?: return
 
-        for (laneIndex in result.lanes.indices) {
-            val points = result.lanes[laneIndex]
-            if (points.size < 3) continue
+        val transform =
+            transformFor(
+                result.sourceWidth,
+                result.sourceHeight,
+            )
 
-            val path = Path()
-            var started = false
+        for (
+            laneIndex in
+            result.lanes.indices
+        ) {
+            val points =
+                result.lanes[
+                    laneIndex
+                ]
 
-            for (p in points) {
-                val x = tr.offsetX + p.x * result.sourceWidth * tr.scale
-                val y = tr.offsetY + p.y * result.sourceHeight * tr.scale
+            if (
+                points.size <
+                3
+            ) {
+                continue
+            }
 
-                if (!started) {
-                    path.moveTo(x, y)
-                    started = true
+            val path =
+                Path()
+
+            var started =
+                false
+
+            for (
+                point in
+                points
+            ) {
+                val x =
+                    transform.offsetX +
+                        point.x *
+                        result.sourceWidth *
+                        transform.scale
+
+                val y =
+                    transform.offsetY +
+                        point.y *
+                        result.sourceHeight *
+                        transform.scale
+
+                if (
+                    !started
+                ) {
+                    path.moveTo(
+                        x,
+                        y,
+                    )
+
+                    started =
+                        true
                 } else {
-                    path.lineTo(x, y)
+                    path.lineTo(
+                        x,
+                        y,
+                    )
                 }
             }
 
             canvas.drawPath(
                 path,
-                if (laneIndex == 1 || laneIndex == 2) egoLanePaint
-                else outerLanePaint,
+                if (
+                    laneIndex ==
+                        1 ||
+                    laneIndex ==
+                        2
+                ) {
+                    egoLanePaint
+                } else {
+                    outerLanePaint
+                },
             )
         }
     }
 
-    private fun drawRoadUsers(canvas: Canvas) {
-        val sw = roadSourceWidth.toFloat().coerceAtLeast(1f)
-        val sh = roadSourceHeight.toFloat().coerceAtLeast(1f)
-        val tr = transformFor(roadSourceWidth, roadSourceHeight)
+    private fun drawDebugGeometry(
+        canvas: Canvas,
+    ) {
+        val hoodY =
+            height *
+                snapshot.hoodTopNorm
 
-        for (item in distanceDetections) {
-            val d = item.detection
-            val left = tr.offsetX + d.left * sw * tr.scale
-            val top = tr.offsetY + d.top * sh * tr.scale
-            val right = tr.offsetX + d.right * sw * tr.scale
-            val bottom = tr.offsetY + d.bottom * sh * tr.scale
+        canvas.drawLine(
+            0f,
+            hoodY,
+            width.toFloat(),
+            hoodY,
+            hoodPaint,
+        )
 
-            canvas.drawRect(
-                RectF(left, top, right, bottom),
-                if (item.isFrontVehicle) frontBoxPaint else stableBoxPaint,
+        val horizonY =
+            height *
+                snapshot.lane.horizonNorm
+
+        canvas.drawLine(
+            0f,
+            horizonY,
+            width.toFloat(),
+            horizonY,
+            hoodPaint,
+        )
+    }
+
+    private fun drawVehicles(
+        canvas: Canvas,
+    ) {
+        val sw =
+            sourceWidth.toFloat()
+                .coerceAtLeast(
+                    1f
+                )
+
+        val sh =
+            sourceHeight.toFloat()
+                .coerceAtLeast(
+                    1f
+                )
+
+        val transform =
+            transformFor(
+                sourceWidth,
+                sourceHeight,
             )
 
-            val label =
-                if (item.isFrontVehicle) "XE PHÍA TRƯỚC"
-                else YoloXTinyDetector.label(d.classId)
+        for (
+            item in
+            snapshot.vehicles
+        ) {
+            val d =
+                item.detection
 
-            val line1 = "$label ${(d.score * 100f).toInt()}%"
+            val left =
+                transform.offsetX +
+                    d.left *
+                    sw *
+                    transform.scale
+
+            val top =
+                transform.offsetY +
+                    d.top *
+                    sh *
+                    transform.scale
+
+            val right =
+                transform.offsetX +
+                    d.right *
+                    sw *
+                    transform.scale
+
+            val bottom =
+                transform.offsetY +
+                    d.bottom *
+                    sh *
+                    transform.scale
+
+            canvas.drawRect(
+                RectF(
+                    left,
+                    top,
+                    right,
+                    bottom,
+                ),
+                if (
+                    item.isLead
+                ) {
+                    leadBox
+                } else {
+                    normalBox
+                },
+            )
+
+            val title =
+                if (
+                    item.isLead
+                ) {
+                    "XE PHÍA TRƯỚC"
+                } else {
+                    YoloXTinyDetector.label(
+                        d.classId
+                    )
+                }
+
+            val line1 =
+                "$title ${(d.score * 100f).toInt()}%"
+
             val line2 =
-                "≈ " +
-                    String.format(Locale.US, "%.1f m", item.distanceMeters) +
-                    if (item.isFrontVehicle && ttcState.ttcSeconds != null) {
-                        " • TTC " +
-                            String.format(Locale.US, "%.1f s", ttcState.ttcSeconds)
-                    } else ""
+                if (
+                    item.isLead
+                ) {
+                    buildString {
+                        append(
+                            "≈ "
+                        )
 
-            val bw = maxOf(
-                textPaint.measureText(line1),
-                distancePaint.measureText(line2),
-            ) + 18f
+                        append(
+                            String.format(
+                                Locale.US,
+                                "%.1f m",
+                                item.distanceMeters,
+                            )
+                        )
 
-            val labelTop = (top - 79f).coerceAtLeast(0f)
+                        if (
+                            snapshot.headwaySeconds !=
+                            null
+                        ) {
+                            append(
+                                " • HMW "
+                            )
+
+                            append(
+                                String.format(
+                                    Locale.US,
+                                    "%.1f s",
+                                    snapshot.headwaySeconds,
+                                )
+                            )
+                        }
+
+                        if (
+                            snapshot.ttcSeconds !=
+                            null
+                        ) {
+                            append(
+                                " • TTC "
+                            )
+
+                            append(
+                                String.format(
+                                    Locale.US,
+                                    "%.1f s",
+                                    snapshot.ttcSeconds,
+                                )
+                            )
+                        }
+                    }
+                } else {
+                    "≈ " +
+                        String.format(
+                            Locale.US,
+                            "%.1f m",
+                            item.distanceMeters,
+                        )
+                }
+
+            val width =
+                maxOf(
+                    textPaint.measureText(
+                        line1
+                    ),
+                    textPaint.measureText(
+                        line2
+                    ),
+                ) +
+                    16f
+
+            val labelTop =
+                (
+                    top -
+                        70f
+                    )
+                    .coerceAtLeast(
+                        0f
+                    )
 
             canvas.drawRect(
                 left,
                 labelTop,
-                left + bw,
-                labelTop + 77f,
-                textBgPaint,
+                left +
+                    width,
+                labelTop +
+                    66f,
+                textBg,
             )
 
-            canvas.drawText(line1, left + 8f, labelTop + 30f, textPaint)
-            canvas.drawText(line2, left + 8f, labelTop + 68f, distancePaint)
+            canvas.drawText(
+                line1,
+                left +
+                    8f,
+                labelTop +
+                    27f,
+                textPaint,
+            )
+
+            canvas.drawText(
+                line2,
+                left +
+                    8f,
+                labelTop +
+                    58f,
+                textPaint,
+            )
         }
     }
 
-    private data class ScreenTransform(
+    private fun drawWarnings(
+        canvas: Canvas,
+    ) {
+        val now =
+            android.os.SystemClock.elapsedRealtime()
+
+        if (
+            now <
+            leadMovedUntil
+        ) {
+            banner(
+                canvas,
+                "XE PHÍA TRƯỚC ĐÃ DI CHUYỂN",
+                34f,
+                infoBg,
+            )
+        }
+
+        if (
+            snapshot.warnings.fcwLevel >
+            0
+        ) {
+            val ttcText =
+                snapshot.ttcSeconds
+                    ?.let {
+                        String.format(
+                            Locale.US,
+                            "%.1f s",
+                            it,
+                        )
+                    }
+                    ?: "--"
+
+            banner(
+                canvas,
+                "FCW • TTC $ttcText",
+                height -
+                    100f,
+                dangerBg,
+            )
+
+            return
+        }
+
+        if (
+            snapshot.warnings.ldwWarning
+        ) {
+            val direction =
+                if (
+                    snapshot.warnings.ldwDirection <
+                    0
+                ) {
+                    "TRÁI"
+                } else {
+                    "PHẢI"
+                }
+
+            banner(
+                canvas,
+                "LỆCH LÀN $direction",
+                height -
+                    100f,
+                dangerBg,
+            )
+
+            return
+        }
+
+        if (
+            snapshot.warnings.hmwWarning
+        ) {
+            val text =
+                snapshot.headwaySeconds
+                    ?.let {
+                        "BÁM XE QUÁ GẦN • HMW " +
+                            String.format(
+                                Locale.US,
+                                "%.1f s",
+                                it,
+                            )
+                    }
+                    ?: "BÁM XE QUÁ GẦN"
+
+            banner(
+                canvas,
+                text,
+                height -
+                    100f,
+                dangerBg,
+            )
+        }
+    }
+
+    private fun banner(
+        canvas: Canvas,
+        text: String,
+        top: Float,
+        background: Paint,
+    ) {
+        val width =
+            bigPaint.measureText(
+                text
+            ) +
+                42f
+
+        val left =
+            (
+                this.width -
+                    width
+                ) *
+                0.5f
+
+        canvas.drawRoundRect(
+            RectF(
+                left,
+                top,
+                left +
+                    width,
+                top +
+                    74f,
+            ),
+            18f,
+            18f,
+            background,
+        )
+
+        canvas.drawText(
+            text,
+            left +
+                21f,
+            top +
+                54f,
+            bigPaint,
+        )
+    }
+
+    private data class Transform(
         val scale: Float,
         val offsetX: Float,
         val offsetY: Float,
     )
 
-    private fun transformFor(sourceWidth: Int, sourceHeight: Int): ScreenTransform {
-        val sw = sourceWidth.toFloat().coerceAtLeast(1f)
-        val sh = sourceHeight.toFloat().coerceAtLeast(1f)
-        val scale = maxOf(width / sw, height / sh)
-        return ScreenTransform(
-            scale,
-            (width - sw * scale) * 0.5f,
-            (height - sh * scale) * 0.5f,
+    private fun transformFor(
+        sourceWidth: Int,
+        sourceHeight: Int,
+    ): Transform {
+        val sw =
+            sourceWidth.toFloat()
+                .coerceAtLeast(
+                    1f
+                )
+
+        val sh =
+            sourceHeight.toFloat()
+                .coerceAtLeast(
+                    1f
+                )
+
+        val scale =
+            maxOf(
+                width /
+                    sw,
+                height /
+                    sh,
+            )
+
+        return Transform(
+            scale =
+                scale,
+            offsetX =
+                (
+                    width -
+                        sw *
+                        scale
+                    ) *
+                    0.5f,
+            offsetY =
+                (
+                    height -
+                        sh *
+                        scale
+                    ) *
+                    0.5f,
         )
     }
 }

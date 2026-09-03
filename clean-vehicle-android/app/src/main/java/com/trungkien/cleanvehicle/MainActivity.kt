@@ -31,81 +31,187 @@ import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
-    private lateinit var previewView: PreviewView
-    private lateinit var overlay: DetectionOverlay
-    private lateinit var status: TextView
+    private lateinit var previewView:
+        PreviewView
 
-    private val analyzerExecutor = Executors.newSingleThreadExecutor()
-    private val modelExecutor = Executors.newSingleThreadExecutor()
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private lateinit var overlay:
+        DetectionOverlay
 
-    private val distanceTracker = DistanceTracker()
-    private val ttcEstimator = TtcEstimator()
-    private val beeper = TtcWarningBeeper()
-    private val autoCal = CameraAutoCalibrator()
-    private val leadMove = LeadVehicleMoveDetector()
+    private lateinit var status:
+        TextView
 
-    private lateinit var speedProvider: SpeedProvider
+    private lateinit var modeButton:
+        TextView
 
-    @Volatile private var detector: YoloXTinyDetector? = null
-    @Volatile private var laneDetector: UfldLaneDetector? = null
-    @Volatile private var cameraRunning = false
-    @Volatile private var currentTtc = TtcState.empty()
-    @Volatile private var lastInferenceMs = 0f
-    @Volatile private var lastLaneInferenceMs = 0f
-    @Volatile private var lastStableVehicleCount = 0
-    @Volatile private var leftLaneConfidence = 0f
-    @Volatile private var rightLaneConfidence = 0f
-    @Volatile private var roadCounter = 0L
-    @Volatile private var laneCounter = 0L
-    private var analysisCounter = 0L
+    private val analyzerExecutor =
+        Executors.newSingleThreadExecutor()
+
+    private val modelExecutor =
+        Executors.newSingleThreadExecutor()
+
+    private val mainHandler =
+        Handler(
+            Looper.getMainLooper()
+        )
+
+    private lateinit var speedProvider:
+        AdasSpeedProvider
+
+    private lateinit var calibrator:
+        AdasAutoCalibrator
+
+    private lateinit var voice:
+        GoogleAdasVoice
+
+    private val decisionEngine =
+        AdasDecisionEngine()
+
+    private val beeper =
+        AdasBeeper()
+
+    @Volatile
+    private var roadDetector:
+        YoloXTinyDetector? =
+        null
+
+    @Volatile
+    private var laneDetector:
+        UfldLaneDetector? =
+        null
+
+    @Volatile
+    private var latestSnapshot =
+        AdasSnapshot()
+
+    @Volatile
+    private var roadInferenceMs =
+        0f
+
+    @Volatile
+    private var laneInferenceMs =
+        0f
+
+    @Volatile
+    private var roadCounter =
+        0L
+
+    @Volatile
+    private var laneCounter =
+        0L
+
+    @Volatile
+    private var cameraRunning =
+        false
+
+    private var analysisCounter =
+        0L
+
+    private var debugMode =
+        false
+
+    private var previousHmwWarning =
+        false
+
+    private var previousLdwWarning =
+        false
 
     private val permissionLauncher =
         registerForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
-        ) { result ->
+        ) {
+            result ->
             val cameraGranted =
-                result[Manifest.permission.CAMERA] == true ||
+                result[
+                    Manifest.permission.CAMERA
+                ] ==
+                    true ||
                     ContextCompat.checkSelfPermission(
                         this,
                         Manifest.permission.CAMERA,
-                    ) == PackageManager.PERMISSION_GRANTED
+                    ) ==
+                        PackageManager.PERMISSION_GRANTED
 
-            if (!cameraGranted) {
-                status.text = "CẦN QUYỀN CAMERA"
+            if (
+                !cameraGranted
+            ) {
+                status.text =
+                    "CẦN QUYỀN CAMERA"
+
                 return@registerForActivityResult
             }
 
             speedProvider.start()
+
             loadModels()
         }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        speedProvider = SpeedProvider(this)
+    override fun onCreate(
+        savedInstanceState: Bundle?,
+    ) {
+        super.onCreate(
+            savedInstanceState
+        )
 
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        speedProvider =
+            AdasSpeedProvider(
+                this
+            )
 
-        @Suppress("DEPRECATION")
+        calibrator =
+            AdasAutoCalibrator(
+                this
+            )
+
+        voice =
+            GoogleAdasVoice(
+                this
+            )
+
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        )
+
+        @Suppress(
+            "DEPRECATION"
+        )
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_FULLSCREEN or
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
 
         buildUi()
+
         requestPermissionsAndStart()
-        mainHandler.post(heartbeat)
+
+        mainHandler.post(
+            heartbeat
+        )
     }
 
     private fun requestPermissionsAndStart() {
-        val cameraGranted =
+        val camera =
             ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.CAMERA,
-            ) == PackageManager.PERMISSION_GRANTED
+            ) ==
+                PackageManager.PERMISSION_GRANTED
 
-        if (cameraGranted) {
-            speedProvider.start()
+        val location =
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            ) ==
+                PackageManager.PERMISSION_GRANTED
+
+        if (
+            camera
+        ) {
+            if (
+                location
+            ) {
+                speedProvider.start()
+            }
+
             loadModels()
         } else {
             permissionLauncher.launch(
@@ -119,59 +225,197 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun buildUi() {
-        val root = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
-        }
+        val root =
+            FrameLayout(
+                this
+            ).apply {
+                setBackgroundColor(
+                    Color.BLACK
+                )
+            }
 
-        previewView = PreviewView(this).apply {
-            implementationMode = PreviewView.ImplementationMode.PERFORMANCE
-            scaleType = PreviewView.ScaleType.FILL_CENTER
-        }
+        previewView =
+            PreviewView(
+                this
+            ).apply {
+                implementationMode =
+                    PreviewView.ImplementationMode.PERFORMANCE
 
-        overlay = DetectionOverlay(this)
+                scaleType =
+                    PreviewView.ScaleType.FILL_CENTER
+            }
 
-        status = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.argb(175, 0, 0, 0))
-            textSize = 13f
-            setPadding(18, 12, 18, 12)
-            text = "TRUNGKIEN CLEAN V1.4 AUTO\nĐANG NẠP..."
-        }
+        overlay =
+            DetectionOverlay(
+                this
+            )
 
-        root.addView(previewView, FrameLayout.LayoutParams(-1, -1))
-        root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
+        status =
+            TextView(
+                this
+            ).apply {
+                setTextColor(
+                    Color.WHITE
+                )
+
+                setBackgroundColor(
+                    Color.argb(
+                        175,
+                        0,
+                        0,
+                        0,
+                    )
+                )
+
+                textSize =
+                    13f
+
+                setPadding(
+                    18,
+                    12,
+                    18,
+                    12,
+                )
+
+                text =
+                    "TRUNGKIEN ADAS V2.0 FULL\nĐANG NẠP..."
+            }
+
+        modeButton =
+            TextView(
+                this
+            ).apply {
+                setTextColor(
+                    Color.WHITE
+                )
+
+                setBackgroundColor(
+                    Color.argb(
+                        185,
+                        0,
+                        120,
+                        85,
+                    )
+                )
+
+                textSize =
+                    14f
+
+                setPadding(
+                    20,
+                    13,
+                    20,
+                    13,
+                )
+
+                text =
+                    "DRIVE"
+
+                setOnClickListener {
+                    debugMode =
+                        !debugMode
+
+                    text =
+                        if (
+                            debugMode
+                        ) {
+                            "DEBUG"
+                        } else {
+                            "DRIVE"
+                        }
+
+                    overlay.setDebugMode(
+                        debugMode
+                    )
+                }
+            }
+
+        root.addView(
+            previewView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            )
+        )
+
+        root.addView(
+            overlay,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            )
+        )
+
         root.addView(
             status,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP or Gravity.START,
+                Gravity.TOP or
+                    Gravity.START,
             )
         )
 
-        setContentView(root)
+        root.addView(
+            modeButton,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or
+                    Gravity.END,
+            ).apply {
+                topMargin =
+                    12
+
+                marginEnd =
+                    12
+            }
+        )
+
+        setContentView(
+            root
+        )
     }
 
     private fun loadModels() {
+        status.text =
+            "TRUNGKIEN ADAS V2.0 FULL\nĐANG NẠP YOLOX + UFLD..."
+
         modelExecutor.execute {
             runCatching {
-                val roadFile = copyAsset(
-                    "yolox_tiny.onnx",
-                    "yolox_tiny_clean_v14.onnx",
-                    5_000_000L,
-                )
+                val roadFile =
+                    copyAsset(
+                        "yolox_tiny.onnx",
+                        "yolox_tiny_adas_v20.onnx",
+                        5_000_000L,
+                    )
 
-                val laneFile = copyLaneAsset()
+                val laneFile =
+                    copyLaneAsset()
 
-                YoloXTinyDetector(roadFile) to
-                    UfldLaneDetector(laneFile)
-            }.onSuccess { models ->
-                detector = models.first
-                laneDetector = models.second
-                runOnUiThread { startCamera() }
-            }.onFailure { e ->
+                YoloXTinyDetector(
+                    roadFile
+                ) to
+                    UfldLaneDetector(
+                        laneFile
+                    )
+            }.onSuccess {
+                models ->
+                roadDetector =
+                    models.first
+
+                laneDetector =
+                    models.second
+
                 runOnUiThread {
-                    status.text = "LỖI MODEL\n${e.message}"
+                    startCamera()
+                }
+            }.onFailure {
+                error ->
+                runOnUiThread {
+                    status.text =
+                        "LỖI MODEL\n" +
+                            "${error.javaClass.simpleName}: ${error.message}"
                 }
             }
         }
@@ -182,245 +426,605 @@ class MainActivity : ComponentActivity() {
         targetName: String,
         minimumSize: Long,
     ): File {
-        val target = File(filesDir, targetName)
+        val target =
+            File(
+                filesDir,
+                targetName,
+            )
 
-        assets.open(assetName).use { input ->
-            target.outputStream().use { output ->
-                input.copyTo(output, 256 * 1024)
+        assets.open(
+            assetName
+        ).use {
+            input ->
+            target.outputStream().use {
+                output ->
+                input.copyTo(
+                    output,
+                    256 *
+                        1024,
+                )
             }
         }
 
-        require(target.length() > minimumSize)
+        require(
+            target.length() >
+                minimumSize
+        )
+
         return target
     }
 
     private fun copyLaneAsset(): File {
-        val target = File(filesDir, "ufld_culane_clean_v14.onnx")
+        val target =
+            File(
+                filesDir,
+                "ufld_culane_adas_v20.onnx",
+            )
 
-        if (target.exists() && target.length() == UFLD_FILE_SIZE) return target
+        if (
+            target.exists() &&
+            target.length() ==
+                UFLD_FILE_SIZE
+        ) {
+            return target
+        }
 
-        assets.open("ufld_culane.onnx").use { input ->
-            target.outputStream().use { output ->
-                input.copyTo(output, 512 * 1024)
+        assets.open(
+            "ufld_culane.onnx"
+        ).use {
+            input ->
+            target.outputStream().use {
+                output ->
+                input.copyTo(
+                    output,
+                    512 *
+                        1024,
+                )
             }
         }
 
-        require(target.length() == UFLD_FILE_SIZE)
+        require(
+            target.length() ==
+                UFLD_FILE_SIZE
+        )
+
         return target
     }
 
     private fun startCamera() {
-        val future = ProcessCameraProvider.getInstance(this)
-
-        future.addListener({
-            val provider = future.get()
-
-            val preview = Preview.Builder()
-                .setTargetAspectRatio(AspectRatio.RATIO_4_3)
-                .build()
-                .also { it.surfaceProvider = previewView.surfaceProvider }
-
-            val selector =
-                ResolutionSelector.Builder()
-                    .setAspectRatioStrategy(
-                        AspectRatioStrategy(
-                            AspectRatio.RATIO_4_3,
-                            AspectRatioStrategy.FALLBACK_RULE_AUTO,
-                        )
-                    )
-                    .setResolutionStrategy(
-                        ResolutionStrategy(
-                            android.util.Size(640, 480),
-                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
-                        )
-                    )
-                    .build()
-
-            val analysis = ImageAnalysis.Builder()
-                .setResolutionSelector(selector)
-                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-
-            analysis.setAnalyzer(analyzerExecutor, ::analyze)
-
-            provider.unbindAll()
-            provider.bindToLifecycle(
-                this,
-                CameraSelector.DEFAULT_BACK_CAMERA,
-                preview,
-                analysis,
+        val future =
+            ProcessCameraProvider.getInstance(
+                this
             )
 
-            cameraRunning = true
+        future.addListener({
+            runCatching {
+                val provider =
+                    future.get()
+
+                val preview =
+                    Preview.Builder()
+                        .setTargetAspectRatio(
+                            AspectRatio.RATIO_4_3
+                        )
+                        .build()
+                        .also {
+                            it.surfaceProvider =
+                                previewView.surfaceProvider
+                        }
+
+                val selector =
+                    ResolutionSelector.Builder()
+                        .setAspectRatioStrategy(
+                            AspectRatioStrategy(
+                                AspectRatio.RATIO_4_3,
+                                AspectRatioStrategy.FALLBACK_RULE_AUTO,
+                            )
+                        )
+                        .setResolutionStrategy(
+                            ResolutionStrategy(
+                                android.util.Size(
+                                    640,
+                                    480,
+                                ),
+                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
+                            )
+                        )
+                        .build()
+
+                val analysis =
+                    ImageAnalysis.Builder()
+                        .setResolutionSelector(
+                            selector
+                        )
+                        .setOutputImageFormat(
+                            ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888
+                        )
+                        .setBackpressureStrategy(
+                            ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST
+                        )
+                        .build()
+
+                analysis.setAnalyzer(
+                    analyzerExecutor,
+                    ::analyze,
+                )
+
+                provider.unbindAll()
+
+                provider.bindToLifecycle(
+                    this,
+                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    preview,
+                    analysis,
+                )
+
+                cameraRunning =
+                    true
+            }.onFailure {
+                error ->
+                status.text =
+                    "LỖI CAMERA\n${error.message}"
+            }
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun analyze(image: ImageProxy) {
-        val road = detector
-        val lane = laneDetector
+    private fun analyze(
+        image: ImageProxy,
+    ) {
+        val road =
+            roadDetector
 
-        if (road == null || lane == null) {
+        val lane =
+            laneDetector
+
+        if (
+            road ==
+                null ||
+            lane ==
+                null
+        ) {
             image.close()
             return
         }
 
         try {
-            val roadResult = road.detect(image)
-            lastInferenceMs = roadResult.inferenceMs
+            val roadResult =
+                road.detect(
+                    image
+                )
+
+            roadInferenceMs =
+                roadResult.inferenceMs
+
             roadCounter++
 
-            val filtered = autoCal.filterHood(roadResult.detections)
-
-            distanceTracker.horizonNorm =
-                autoCal.state.horizonNorm
-
-            val stable =
-                distanceTracker.update(filtered)
-
-            lastStableVehicleCount = stable.size
-
-            val front =
-                stable.firstOrNull { it.isFrontVehicle }
-
-            currentTtc =
-                ttcEstimator.update(
-                    front,
-                    speedProvider.speedKph,
-                    SystemClock.elapsedRealtime(),
+            val filtered =
+                calibrator.filterSelfVehicle(
+                    roadResult.detections
                 )
 
-            beeper.update(currentTtc.riskLevel)
-
-            val moved =
-                leadMove.update(
-                    front,
-                    speedProvider.speedKph,
-                    SystemClock.elapsedRealtime(),
+            val snapshot =
+                decisionEngine.update(
+                    detections =
+                        filtered,
+                    lane =
+                        calibrator.geometry,
+                    hoodTopNorm =
+                        calibrator.hoodTopNorm(),
+                    speedKph =
+                        speedProvider.speedKph,
+                    nowMs =
+                        SystemClock.elapsedRealtime(),
                 )
 
-            if (moved) {
-                beeper.leadMovedDoubleBeep()
-            }
+            latestSnapshot =
+                snapshot
+
+            handleWarnings(
+                snapshot
+            )
 
             runOnUiThread {
                 overlay.updateRoad(
                     roadResult,
-                    stable,
-                    currentTtc,
-                    autoCal.state,
-                    leadMove.state,
+                    snapshot,
                 )
             }
 
             analysisCounter++
 
-            if (analysisCounter % 2L == 0L) {
-                val laneResult = lane.detect(image)
+            if (
+                analysisCounter %
+                    2L ==
+                0L
+            ) {
+                val laneResult =
+                    lane.detect(
+                        image
+                    )
 
-                lastLaneInferenceMs =
+                laneInferenceMs =
                     laneResult.inferenceMs
 
                 laneCounter++
 
-                leftLaneConfidence =
-                    laneResult.confidence[1]
-
-                rightLaneConfidence =
-                    laneResult.confidence[2]
-
-                autoCal.observeLane(laneResult)
+                calibrator.observe(
+                    laneResult
+                )
 
                 runOnUiThread {
-                    overlay.updateLane(laneResult)
+                    overlay.updateLane(
+                        laneResult
+                    )
                 }
             }
-        } catch (e: Throwable) {
-            beeper.update(0)
+        } catch (
+            error: Throwable
+        ) {
+            beeper.updateFcwLevel(
+                0
+            )
 
             runOnUiThread {
-                status.text = "AI ERROR\n${e.javaClass.simpleName}: ${e.message}"
+                status.text =
+                    "AI ERROR\n" +
+                        "${error.javaClass.simpleName}: ${error.message}"
             }
         } finally {
             image.close()
         }
     }
 
-    private val heartbeat = object : Runnable {
-        override fun run() {
-            val cal = autoCal.state
-            val gps = speedProvider.speedKph
-            val ttc = currentTtc
+    private fun handleWarnings(
+        snapshot: AdasSnapshot,
+    ) {
+        beeper.updateFcwLevel(
+            snapshot.warnings.fcwLevel
+        )
 
-            status.text =
-                buildString {
-                    append("TRUNGKIEN CLEAN V1.4 AUTO\n")
+        if (
+            snapshot.warnings.leadMovedEvent
+        ) {
+            beeper.leadMovedCue()
+            voice.leadMoved()
+        }
 
-                    append("GPS ")
-                    append(gps?.roundToInt() ?: -1)
-                    append(" km/h • XE ")
-                    append(lastStableVehicleCount)
-                    append(" • ROAD ")
-                    append(lastInferenceMs.roundToInt())
-                    append(" ms #")
-                    append(roadCounter)
+        if (
+            snapshot.warnings.voiceFcwEvent
+        ) {
+            voice.collisionRisk()
+        }
 
-                    append("\nAUTO ")
-                    append(if (cal.locked) "LOCK" else "LEARN")
-                    append(" • H ")
-                    append(String.format(Locale.US, "%.2f", cal.horizonNorm))
-                    append(" • ROLL ")
-                    append(String.format(Locale.US, "%.1f°", cal.rollDeg))
-                    append(" • HOOD ")
-                    append(String.format(Locale.US, "%.2f", cal.hoodTopNorm))
+        if (
+            snapshot.warnings.ldwWarning &&
+            !previousLdwWarning
+        ) {
+            beeper.laneCue()
+        }
 
-                    append("\nLANE L ")
-                    append((leftLaneConfidence * 100f).roundToInt())
-                    append("% R ")
-                    append((rightLaneConfidence * 100f).roundToInt())
-                    append("% • ")
-                    append(lastLaneInferenceMs.roundToInt())
-                    append(" ms #")
-                    append(laneCounter)
+        if (
+            snapshot.warnings.voiceLdwEvent
+        ) {
+            voice.laneDeparture()
+        }
 
-                    if (ttc.distanceMeters > 0f) {
-                        append("\nFRONT ≈ ")
-                        append(String.format(Locale.US, "%.1f m", ttc.distanceMeters))
+        if (
+            snapshot.warnings.hmwWarning &&
+            !previousHmwWarning &&
+            snapshot.warnings.fcwLevel ==
+                0
+        ) {
+            beeper.headwayCue()
+        }
+
+        previousHmwWarning =
+            snapshot.warnings.hmwWarning
+
+        previousLdwWarning =
+            snapshot.warnings.ldwWarning
+    }
+
+    private val heartbeat =
+        object : Runnable {
+            override fun run() {
+                val snapshot =
+                    latestSnapshot
+
+                val lane =
+                    snapshot.lane
+
+                status.text =
+                    if (
+                        debugMode
+                    ) {
+                        buildString {
+                            append(
+                                "TRUNGKIEN ADAS V2.0 FULL • DEBUG\n"
+                            )
+
+                            append(
+                                "GPS "
+                            )
+
+                            append(
+                                snapshot.speedKph
+                                    ?.roundToInt()
+                                    ?: -1
+                            )
+
+                            append(
+                                " km/h • ROAD "
+                            )
+
+                            append(
+                                roadInferenceMs
+                                    .roundToInt()
+                            )
+
+                            append(
+                                " ms #"
+                            )
+
+                            append(
+                                roadCounter
+                            )
+
+                            append(
+                                "\nAUTO "
+                            )
+
+                            append(
+                                if (
+                                    lane.locked
+                                ) {
+                                    "LOCK"
+                                } else {
+                                    "LEARN"
+                                }
+                            )
+
+                            append(
+                                " H="
+                            )
+
+                            append(
+                                String.format(
+                                    Locale.US,
+                                    "%.2f",
+                                    lane.horizonNorm,
+                                )
+                            )
+
+                            append(
+                                " ROLL="
+                            )
+
+                            append(
+                                String.format(
+                                    Locale.US,
+                                    "%.1f°",
+                                    lane.rollDeg,
+                                )
+                            )
+
+                            append(
+                                " CONF="
+                            )
+
+                            append(
+                                (
+                                    lane.confidence *
+                                        100f
+                                    )
+                                    .roundToInt()
+                            )
+
+                            append(
+                                "%"
+                            )
+
+                            append(
+                                "\nLANE "
+                            )
+
+                            append(
+                                laneInferenceMs
+                                    .roundToInt()
+                            )
+
+                            append(
+                                " ms #"
+                            )
+
+                            append(
+                                laneCounter
+                            )
+
+                            append(
+                                " • HOOD "
+                            )
+
+                            append(
+                                String.format(
+                                    Locale.US,
+                                    "%.2f",
+                                    snapshot.hoodTopNorm,
+                                )
+                            )
+
+                            append(
+                                "\n"
+                            )
+
+                            append(
+                                snapshot.debugText
+                            )
+
+                            appendLeadNumbers(
+                                snapshot
+                            )
+                        }
+                    } else {
+                        buildString {
+                            append(
+                                "ADAS V2.0"
+                            )
+
+                            append(
+                                " • "
+                            )
+
+                            append(
+                                snapshot.speedKph
+                                    ?.roundToInt()
+                                    ?: 0
+                            )
+
+                            append(
+                                " km/h"
+                            )
+
+                            append(
+                                if (
+                                    lane.locked
+                                ) {
+                                    " • CAL"
+                                } else {
+                                    " • CAL..."
+                                }
+                            )
+
+                            appendLeadNumbers(
+                                snapshot
+                            )
+                        }
                     }
 
-                    if (ttc.ttcSeconds != null) {
-                        append(" • TTC ≈ ")
-                        append(String.format(Locale.US, "%.1f s", ttc.ttcSeconds))
-                        append(" • BEEP ")
-                        append(ttc.riskLevel)
-                    }
+                mainHandler.postDelayed(
+                    this,
+                    1_000L,
+                )
+            }
+        }
 
-                    if (leadMove.state.armed && !leadMove.state.moved) {
-                        append("\nĐÈN ĐỎ: ĐANG THEO DÕI XE PHÍA TRƯỚC")
-                    }
+    private fun StringBuilder.appendLeadNumbers(
+        snapshot: AdasSnapshot,
+    ) {
+        val lead =
+            snapshot.lead
 
-                    if (leadMove.state.moved) {
-                        append("\nXE PHÍA TRƯỚC ĐÃ DI CHUYỂN")
-                    }
-                }
+        if (
+            lead !=
+            null
+        ) {
+            append(
+                "\nFRONT ≈ "
+            )
 
-            mainHandler.postDelayed(this, 1000L)
+            append(
+                String.format(
+                    Locale.US,
+                    "%.1f m",
+                    lead.distanceMeters,
+                )
+            )
+
+            if (
+                snapshot.headwaySeconds !=
+                null
+            ) {
+                append(
+                    " • HMW "
+                )
+
+                append(
+                    String.format(
+                        Locale.US,
+                        "%.1f s",
+                        snapshot.headwaySeconds,
+                    )
+                )
+            }
+
+            if (
+                snapshot.ttcSeconds !=
+                null
+            ) {
+                append(
+                    " • TTC "
+                )
+
+                append(
+                    String.format(
+                        Locale.US,
+                        "%.1f s",
+                        snapshot.ttcSeconds,
+                    )
+                )
+
+                append(
+                    " • FCW "
+                )
+
+                append(
+                    snapshot.warnings.fcwLevel
+                )
+            }
+        }
+
+        if (
+            snapshot.timeToLaneCrossSeconds !=
+            null
+        ) {
+            append(
+                "\nTLC "
+            )
+
+            append(
+                String.format(
+                    Locale.US,
+                    "%.1f s",
+                    snapshot.timeToLaneCrossSeconds,
+                )
+            )
         }
     }
 
     override fun onDestroy() {
-        mainHandler.removeCallbacks(heartbeat)
-        beeper.update(0)
+        mainHandler.removeCallbacks(
+            heartbeat
+        )
+
+        beeper.updateFcwLevel(
+            0
+        )
+
         beeper.close()
+
+        voice.close()
+
         speedProvider.stop()
-        detector?.close()
+
+        roadDetector?.close()
+
         laneDetector?.close()
+
+        roadDetector =
+            null
+
+        laneDetector =
+            null
+
         analyzerExecutor.shutdownNow()
+
         modelExecutor.shutdownNow()
+
         super.onDestroy()
     }
 
     companion object {
-        private const val UFLD_FILE_SIZE = 178_076_232L
+        private const val UFLD_FILE_SIZE =
+            178_076_232L
     }
 }

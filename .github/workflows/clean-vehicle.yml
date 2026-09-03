@@ -1,4 +1,4 @@
-name: TrungKien Clean V1.4 Auto
+name: TrungKien ADAS V2.0 FULL
 
 on:
   workflow_dispatch:
@@ -11,6 +11,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -28,39 +29,68 @@ jobs:
       - name: Install Android SDK
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
 
-      - name: Download models
+      - name: Download YOLOX and UFLD
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p clean-vehicle-android/app/src/main/assets /tmp/ufld
 
-          curl -L --fail --retry 5 \
+          mkdir -p \
+            clean-vehicle-android/app/src/main/assets \
+            /tmp/ufld
+
+          curl -L --fail --retry 5 --connect-timeout 30 \
             "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx" \
             -o clean-vehicle-android/app/src/main/assets/yolox_tiny.onnx
 
-          curl -L --fail --retry 5 \
+          YOLO_SIZE="$(
+            stat -c%s \
+              clean-vehicle-android/app/src/main/assets/yolox_tiny.onnx
+          )"
+
+          test "$YOLO_SIZE" -gt 5000000
+          test "$YOLO_SIZE" -lt 50000000
+
+          curl -L --fail --retry 5 --connect-timeout 30 \
             "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/140_Ultra-Fast-Lane-Detection/resources_culane.tar.gz" \
             -o /tmp/ufld.tar.gz
 
           tar -xzf /tmp/ufld.tar.gz -C /tmp/ufld
 
+          LANE_SRC="/tmp/ufld/saved_model_culane/ultra_falst_lane_detection_culane_288x800.onnx"
+
+          test -f "$LANE_SRC"
+
           cp \
-            /tmp/ufld/saved_model_culane/ultra_falst_lane_detection_culane_288x800.onnx \
+            "$LANE_SRC" \
             clean-vehicle-android/app/src/main/assets/ufld_culane.onnx
 
-          test "$(stat -c%s clean-vehicle-android/app/src/main/assets/ufld_culane.onnx)" = "178076232"
+          test "$(
+            stat -c%s \
+              clean-vehicle-android/app/src/main/assets/ufld_culane.onnx
+          )" = "178076232"
 
-      - name: Build V1.4
+          echo \
+            "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  clean-vehicle-android/app/src/main/assets/ufld_culane.onnx" \
+            | sha256sum -c -
+
+      - name: Build ADAS V2.0
         working-directory: clean-vehicle-android
         run: gradle --no-daemon clean :app:assembleDebug
 
       - name: Prepare APK
+        shell: bash
         run: |
+          set -euo pipefail
+
+          APK="clean-vehicle-android/app/build/outputs/apk/debug/app-debug.apk"
+
+          test -f "$APK"
+
           cp \
-            "clean-vehicle-android/app/build/outputs/apk/debug/app-debug.apk" \
-            "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN V1.4 AUTO.apk"
+            "$APK" \
+            "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN ADAS V2.0 FULL.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TrungKien-Clean-V1.4-Auto
-          path: "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN V1.4 AUTO.apk"
+          name: TrungKien-ADAS-V2.0-FULL
+          path: "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN ADAS V2.0 FULL.apk"

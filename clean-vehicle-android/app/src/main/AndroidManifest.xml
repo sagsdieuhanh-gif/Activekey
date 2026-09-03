@@ -4,12 +4,21 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <uses-feature android:name="android.hardware.camera" android:required="true" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="true" />
+
+    <queries>
+        <package android:name="com.google.android.tts" />
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="false"
-        android:icon="@drawable/ic_launcher_v14"
-        android:label="TRUNGKIEN V1.4 AUTO"
+        android:icon="@drawable/ic_launcher_v20"
+        android:label="TRUNGKIEN ADAS V2.0"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
