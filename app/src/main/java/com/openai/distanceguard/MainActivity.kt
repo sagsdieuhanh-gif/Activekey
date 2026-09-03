@@ -60,6 +60,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var correctionButton: TextView
     private lateinit var signButton: TextView
     private lateinit var hoodDoneButton: TextView
+    private lateinit var manualLaneCalibrationView: ManualLaneCalibrationView
+    private lateinit var manualLaneControlBar: LinearLayout
+    private lateinit var mainPanel: LinearLayout
     private lateinit var licenseGate: LicenseGate
     private lateinit var hoodStore: HoodExclusionStore
     private lateinit var thermalGuard: ThermalGuard
@@ -108,6 +111,8 @@ class MainActivity : ComponentActivity() {
     private val laneCoreEnginePreprocessor = LaneSensePreprocessor()
     private val laneCoreEngineInterpreter = LaneSenseInterpreter()
     private lateinit var calibrationStore: CalibrationStore
+    private lateinit var manualLaneCalibrationStore: ManualLaneCalibrationStore
+    @Volatile private var manualLaneCalibration = ManualLaneCalibration()
     private lateinit var correctionStore: DistanceCorrectionStore
     private lateinit var estimator: GroundPlaneDistanceEstimator
     private lateinit var leadProjector: MetricLeadProjector
@@ -237,9 +242,12 @@ class MainActivity : ComponentActivity() {
         trafficSignState.set(TrafficSignState(enabled = false))
         displayEcoMode = getSharedPreferences("display_power_v12", android.content.Context.MODE_PRIVATE).getBoolean("eco_mode", false)
         calibrationStore = CalibrationStore(this)
+        manualLaneCalibrationStore = ManualLaneCalibrationStore(this)
         correctionStore = DistanceCorrectionStore(this)
         corrector = AdaptiveDistanceCorrector(correctionStore.load())
         estimator = GroundPlaneDistanceEstimator(calibrationStore.load())
+        manualLaneCalibration = manualLaneCalibrationStore.load()
+        laneCoreEnginePreprocessor.setManualCalibration(manualLaneCalibration)
         laneDetector.neutralOffsetFraction = estimator.calibration.laneNeutralOffsetFraction
         leadProjector = MetricLeadProjector(estimator, corrector)
         targetSelector = TargetSelector(estimator, corrector)
@@ -379,7 +387,7 @@ class MainActivity : ComponentActivity() {
         box.addView(keyInput, LinearLayout.LayoutParams(-1, -2))
 
         val builder = AlertDialog.Builder(this)
-            .setTitle("BẢN QUYỀN / KEY • V15.1")
+            .setTitle("BẢN QUYỀN / KEY • TrungKien V1")
             .setView(box)
             .setPositiveButton("KÍCH HOẠT", null)
         if (!blocking) builder.setNegativeButton("ĐÓNG", null)
@@ -449,6 +457,44 @@ class MainActivity : ComponentActivity() {
         root.addView(previewView, FrameLayout.LayoutParams(-1, -1))
         root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
 
+        manualLaneCalibrationView = ManualLaneCalibrationView(this).apply {
+            visibility = View.GONE
+        }
+        root.addView(manualLaneCalibrationView, FrameLayout.LayoutParams(-1, -1))
+
+        manualLaneControlBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            background = roundedBackground(Color.argb(205, 0, 0, 0), 14f)
+            visibility = View.GONE
+        }
+        val manualCancelButton = actionButton("HỦY", compact = true).apply {
+            setOnClickListener { finishManualLaneCalibration(save = false) }
+        }
+        val manualSaveButton = actionButton("✓  LƯU & AUTO", compact = true).apply {
+            setOnClickListener { finishManualLaneCalibration(save = true) }
+        }
+        manualLaneControlBar.addView(
+            manualCancelButton,
+            LinearLayout.LayoutParams(0, dp(44), 0.36f).apply { rightMargin = dp(4) },
+        )
+        manualLaneControlBar.addView(
+            manualSaveButton,
+            LinearLayout.LayoutParams(0, dp(44), 0.64f).apply { leftMargin = dp(4) },
+        )
+        root.addView(
+            manualLaneControlBar,
+            FrameLayout.LayoutParams(if (portrait) -1 else dp(430), dp(52)).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                topMargin = dp(58)
+                if (portrait) {
+                    leftMargin = dp(10)
+                    rightMargin = dp(10)
+                }
+            }
+        )
+
         // Internal status views are kept for detailed diagnostics but no longer clutter the camera screen.
         modelStatus = chip("XE PHÍA TRƯỚC: đang nạp ROAD CORE…")
         pedestrianStatus = chip("ROAD USERS: đang nạp ROAD CORE…")
@@ -507,6 +553,7 @@ class MainActivity : ComponentActivity() {
             setPadding(dp(if (portrait) 12 else 20), dp(7), dp(if (portrait) 12 else 20), dp(7))
             background = roundedBackground(Color.argb(155, 0, 0, 0), 16f)
         }
+        mainPanel = panel
         val mainMetrics = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -649,11 +696,11 @@ class MainActivity : ComponentActivity() {
         addAction("◎  TỰ CÂN CHỈNH GÓC CAMERA", "Học lại pitch / roll / yaw theo tư thế gắn hiện tại") { restartAutoCalibration() }
         addAction(if (displayEcoMode) "☀  TẮT MÀN HÌNH TIẾT KIỆM" else "☾  MÀN HÌNH TIẾT KIỆM", if (displayEcoMode) "Trả độ sáng về tự động của hệ thống" else "Giảm độ sáng khi chạy lâu để giảm nhiệt và hao pin") { toggleDisplayEcoMode() }
 
-        section("HIỆU CHỈNH", "V15 tự học sai số khoảng cách và cho phép loại phần đầu xe khỏi vùng đo")
+        section("HIỆU CHỈNH BẰNG HÌNH ẢNH", "AUTO là mặc định • chỉ tinh chỉnh khi làn hoặc chân trời chưa khớp")
+        addAction("⌖  TINH CHỈNH LÀN + CHÂN TRỜI", "Bước 1 kéo chân trời • Bước 2 kéo 4 điểm vào mép làn") { startManualLaneCalibration() }
+        addAction("↺  TRỞ VỀ AUTO LANE", "Xóa phần tinh chỉnh tay và dùng hoàn toàn kết quả tự động") { resetManualLaneCalibration() }
         addAction("▰  VÙNG BỎ QUA ĐẦU XE", "Kéo trực tiếp vạch giới hạn trên camera • phần dưới không đo") { startHoodEdit() }
         addAction("↺  RESET VÙNG ĐẦU XE", "Trả vạch về mức khởi tạo rồi có thể kéo chỉnh lại") { resetHoodExclusion() }
-        addAction("⌖  HIỆU CHỈNH TÂM LÀN", "Căn tâm xe khi camera đặt lệch trái hoặc phải") { showLaneCalibrationDialog() }
-        addAction("▣  HÌNH HỌC CAMERA", "Chiều cao camera • FOV • góc dự phòng") { showCalibrationDialog() }
         addAction("◉  TỰ HIỆU CHỈNH KHOẢNG CÁCH", "Không nhập mốc tay • xem trạng thái hoặc xóa dữ liệu tự học") { showAutoDistanceCalibrationDialog() }
 
         section("BẢN QUYỀN", "Bản dùng thử 5 phút • key được admin cấp theo mã thiết bị")
@@ -677,7 +724,7 @@ class MainActivity : ComponentActivity() {
         }
 
         dialog = AlertDialog.Builder(this)
-            .setTitle("TRUNGKIEN V15.3 • ĐIỀU KHIỂN")
+            .setTitle("TrungKien V1 • ĐIỀU KHIỂN")
             .setView(scroll)
             .setNegativeButton("ĐÓNG", null)
             .create()
@@ -688,6 +735,98 @@ class MainActivity : ComponentActivity() {
             }
         }
         dialog?.show()
+    }
+
+
+    private fun startManualLaneCalibration() {
+        val aspect = preprocessor.displayAspect.coerceIn(0.45f, 2.30f)
+        val autoHorizon = laneCoreEnginePreprocessor.estimateAutoHorizonY(estimator.calibration, aspect)
+        val existing = manualLaneCalibration
+
+        val draft = if (existing.isCompatible(aspect)) {
+            existing.copy(
+                horizonY = (autoHorizon + existing.horizonOffset).coerceIn(0.16f, 0.72f),
+                autoHorizonAtSave = autoHorizon,
+                savedAspect = aspect,
+            ).normalized()
+        } else {
+            val lane = latestLaneForCalibration.get()
+            val farY = (autoHorizon + 0.15f).coerceIn(0.50f, 0.68f)
+            val nearY = 0.90f
+            val far = lane?.boundsAt(farY)
+            val near = lane?.boundsAt(nearY)
+            ManualLaneCalibration(
+                enabled = true,
+                horizonY = autoHorizon,
+                autoHorizonAtSave = autoHorizon,
+                leftFar = ManualLanePoint(far?.first ?: 0.42f, farY),
+                rightFar = ManualLanePoint(far?.second ?: 0.58f, farY),
+                leftNear = ManualLanePoint(near?.first ?: 0.18f, nearY),
+                rightNear = ManualLanePoint(near?.second ?: 0.82f, nearY),
+                savedAspect = aspect,
+            ).normalized()
+        }
+
+        manualLaneCalibrationView.setCalibration(draft)
+        manualLaneCalibrationView.visibility = View.VISIBLE
+        manualLaneControlBar.visibility = View.VISIBLE
+        overlay.visibility = View.GONE
+        mainPanel.visibility = View.GONE
+        summaryStatus.visibility = View.GONE
+        muteButton.visibility = View.GONE
+        hoodDoneButton.visibility = View.GONE
+        speaker.suppressFor(60_000L)
+
+        Toast.makeText(
+            this,
+            "B1 kéo vạch vàng tới chân trời. B2 kéo 4 điểm trắng vào mép làn. Sau đó bấm LƯU & AUTO.",
+            Toast.LENGTH_LONG,
+        ).show()
+    }
+
+    private fun finishManualLaneCalibration(save: Boolean) {
+        if (save) {
+            val aspect = preprocessor.displayAspect.coerceIn(0.45f, 2.30f)
+            val autoHorizon = laneCoreEnginePreprocessor.estimateAutoHorizonY(estimator.calibration, aspect)
+            val saved = manualLaneCalibrationView.currentCalibration()
+                .copy(enabled = true, autoHorizonAtSave = autoHorizon, savedAspect = aspect)
+                .normalized()
+
+            manualLaneCalibration = saved
+            manualLaneCalibrationStore.save(saved)
+            laneCoreEnginePreprocessor.setManualCalibration(saved)
+
+            latestLaneSenseLane.set(null)
+            laneCoreEnginePreprocessor.resetTemporalState()
+            laneCoreEngineInterpreter.reset()
+            laneHybridFusion.reset()
+            laneStabilityGate.reset()
+            laneDetector.reset()
+            resetRangeLearningAfterGeometryChange(
+                "Đã lưu làn + chân trời. AUTO vẫn nhận vạch thật; phần chỉnh tay chỉ căn vị trí."
+            )
+        }
+
+        manualLaneCalibrationView.visibility = View.GONE
+        manualLaneControlBar.visibility = View.GONE
+        overlay.visibility = View.VISIBLE
+        mainPanel.visibility = View.VISIBLE
+        summaryStatus.visibility = View.VISIBLE
+        muteButton.visibility = View.VISIBLE
+        speaker.suppressFor(1_500L)
+    }
+
+    private fun resetManualLaneCalibration() {
+        manualLaneCalibrationStore.clear()
+        manualLaneCalibration = ManualLaneCalibration()
+        laneCoreEnginePreprocessor.setManualCalibration(manualLaneCalibration)
+        latestLaneSenseLane.set(null)
+        laneCoreEnginePreprocessor.resetTemporalState()
+        laneCoreEngineInterpreter.reset()
+        laneHybridFusion.reset()
+        laneStabilityGate.reset()
+        laneDetector.reset()
+        resetRangeLearningAfterGeometryChange("Đã xóa tinh chỉnh tay. Làn và chân trời trở về AUTO.")
     }
 
 
@@ -797,6 +936,9 @@ class MainActivity : ComponentActivity() {
             append("Làn: ").append(laneModelStatus.text).append("\n")
             append("Vật thể: ").append(pedestrianStatus.text).append("\n")
             append("AUTO góc: ").append(lastAutoCalibrationState.name).append("\n")
+            append("Làn/chân trời: ").append(
+                if (manualLaneCalibration.isCompatible(preprocessor.displayAspect)) "AUTO + TINH CHỈNH TAY" else "AUTO"
+            ).append("\n")
             val rangeStats = corrector.stats()
             append("AUTO khoảng cách: ").append(rangeStats.sampleCount).append(" mẫu")
                 .append(" • ").append(String.format(Locale.US, "%.3f×", rangeStats.meanRatio)).append("\n")
@@ -1165,7 +1307,13 @@ class MainActivity : ComponentActivity() {
             val freshLaneSense = latestLaneSenseLane.get()?.takeIf {
                 timestamp >= it.timestampNs && timestamp - it.timestampNs <= 1_000_000_000L
             }?.state
-            val rawLane = laneHybridFusion.update(freshLaneSense, cvLane, timestamp)
+            val autoLane = laneHybridFusion.update(freshLaneSense, cvLane, timestamp)
+            val rawLane = ManualLaneGuide.apply(
+                lane = autoLane,
+                tuning = manualLaneCalibration,
+                displayAspect = preprocessor.displayAspect,
+                neutralOffsetFraction = calibrationSnapshot.laneNeutralOffsetFraction,
+            )
             val lane = laneStabilityGate.update(
                 fused = rawLane,
                 core = freshLaneSense,
