@@ -1,0 +1,66 @@
+name: TrungKien Web V1 - GitHub Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - "web/**"
+      - ".github/workflows/web-pages.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: trungkien-web-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Prepare static site
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist/models
+          cp -a web/. dist/
+
+      - name: Download exact UFLD CULane FP32 model
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ufld
+          curl -L --retry 4 --connect-timeout 30             "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/140_Ultra-Fast-Lane-Detection/resources_culane.tar.gz"             -o /tmp/ufld.tar.gz
+          tar -xzf /tmp/ufld.tar.gz -C /tmp/ufld
+          MODEL="/tmp/ufld/saved_model_culane/ultra_falst_lane_detection_culane_288x800.onnx"
+          test -f "$MODEL"
+          test "$(stat -c%s "$MODEL")" = "178076232"
+          echo "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  $MODEL" | sha256sum -c -
+          cp "$MODEL" dist/models/lane_core.onnx
+          echo "UFLD CULane ready: $(du -h dist/models/lane_core.onnx | cut -f1)"
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
