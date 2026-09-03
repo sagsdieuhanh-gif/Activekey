@@ -1,4 +1,4 @@
-name: TrungKien ADAS Stable
+name: TrungKien ADAS V3 Stable
 
 on:
   workflow_dispatch:
@@ -11,17 +11,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: android-actions/setup-android@v3
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
@@ -29,36 +25,32 @@ jobs:
       - name: Install Android SDK
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
 
-      - name: Download YOLOX and UFLD
+      - name: Download AI models
         shell: bash
         run: |
           set -euo pipefail
-
-          mkdir -p \
-            clean-vehicle-android/app/src/main/assets \
-            /tmp/ufld
+          mkdir -p clean-vehicle-android/app/src/main/assets /tmp/ufld
 
           curl -L --fail --retry 5 --connect-timeout 30 \
             "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx" \
             -o clean-vehicle-android/app/src/main/assets/yolox_tiny.onnx
-
           test "$(stat -c%s clean-vehicle-android/app/src/main/assets/yolox_tiny.onnx)" -gt 5000000
 
           curl -L --fail --retry 5 --connect-timeout 30 \
             "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/140_Ultra-Fast-Lane-Detection/resources_culane.tar.gz" \
             -o /tmp/ufld.tar.gz
-
           tar -xzf /tmp/ufld.tar.gz -C /tmp/ufld
-
-          cp \
-            /tmp/ufld/saved_model_culane/ultra_falst_lane_detection_culane_288x800.onnx \
+          cp /tmp/ufld/saved_model_culane/ultra_falst_lane_detection_culane_288x800.onnx \
             clean-vehicle-android/app/src/main/assets/ufld_culane.onnx
-
           test "$(stat -c%s clean-vehicle-android/app/src/main/assets/ufld_culane.onnx)" = "178076232"
+          echo "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  clean-vehicle-android/app/src/main/assets/ufld_culane.onnx" | sha256sum -c -
 
-          echo \
-            "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  clean-vehicle-android/app/src/main/assets/ufld_culane.onnx" \
-            | sha256sum -c -
+          curl -L --fail --retry 5 --connect-timeout 30 \
+            "https://raw.githubusercontent.com/take1014/openpilot-runner/5f0ac7695125ed2d7a240a3814d7da1f839f3bc3/models/supercombo.onnx" \
+            -o clean-vehicle-android/app/src/main/assets/supercombo.onnx
+          test "$(stat -c%s clean-vehicle-android/app/src/main/assets/supercombo.onnx)" = "57554657"
+          echo "Supercombo bytes: $(stat -c%s clean-vehicle-android/app/src/main/assets/supercombo.onnx)"
+          sha256sum clean-vehicle-android/app/src/main/assets/supercombo.onnx
 
       - name: Restore stable signing key
         shell: bash
@@ -80,10 +72,9 @@ jobs:
           keytool -list -v \
             -keystore clean-vehicle-android/app/trungkien-release.jks \
             -storepass "$STORE_PASSWORD" \
-            -alias "$KEY_ALIAS" \
-            | grep -E "SHA256:|Alias name:"
+            -alias "$KEY_ALIAS" | grep -E "SHA256:|Alias name:"
 
-      - name: Build signed TrungKien ADAS release
+      - name: Build signed TrungKien ADAS V3
         working-directory: clean-vehicle-android
         env:
           TK_ADAS_KEYSTORE_FILE: trungkien-release.jks
@@ -96,17 +87,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           APK="clean-vehicle-android/app/build/outputs/apk/release/app-release.apk"
           test -f "$APK"
-
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
-
-          cp \
-            "$APK" \
-            "clean-vehicle-android/app/build/outputs/apk/release/TrungKien ADAS V2.4.apk"
+          cp "$APK" "clean-vehicle-android/app/build/outputs/apk/release/TrungKien ADAS V3.0.apk"
 
       - uses: actions/upload-artifact@v4
         with:
           name: TrungKien-ADAS-Stable
-          path: "clean-vehicle-android/app/build/outputs/apk/release/TrungKien ADAS V2.4.apk"
+          path: "clean-vehicle-android/app/build/outputs/apk/release/TrungKien ADAS V3.0.apk"

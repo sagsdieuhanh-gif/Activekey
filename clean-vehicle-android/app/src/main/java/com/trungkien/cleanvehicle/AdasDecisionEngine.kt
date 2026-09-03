@@ -117,6 +117,7 @@ class AdasDecisionEngine {
         hoodTopNorm: Float,
         speedKph: Float?,
         nowMs: Long,
+        leadHint: SupercomboLeadHint? = null,
     ): AdasSnapshot {
         updateTracks(
             detections = detections,
@@ -138,6 +139,7 @@ class AdasDecisionEngine {
                 stable = stable,
                 lane = lane,
                 nowMs = nowMs,
+                leadHint = leadHint,
             )
 
         val vehicles =
@@ -737,6 +739,7 @@ class AdasDecisionEngine {
         stable: List<Track>,
         lane: AdasLaneGeometry,
         nowMs: Long,
+        leadHint: SupercomboLeadHint?,
     ): Track? {
         val fresh =
             stable.filter {
@@ -770,6 +773,7 @@ class AdasDecisionEngine {
                     leadScore(
                         track = it,
                         lane = lane,
+                        leadHint = leadHint,
                     )
                 }
 
@@ -1038,6 +1042,7 @@ class AdasDecisionEngine {
     private fun leadScore(
         track: Track,
         lane: AdasLaneGeometry,
+        leadHint: SupercomboLeadHint?,
     ): Float {
         val relation =
             laneRelation(
@@ -1066,10 +1071,25 @@ class AdasDecisionEngine {
             ) *
                 0.025f
 
+        val supercomboBonus =
+            leadHint
+                ?.takeIf {
+                    it.probability >= 0.35f &&
+                        it.distanceMeters > 0f
+                }
+                ?.let {
+                    val delta = kotlin.math.abs(track.distance - it.distanceMeters)
+                    (12f - delta * 0.85f)
+                        .coerceAtLeast(0f) *
+                        it.probability
+                }
+                ?: 0f
+
         return track.distance +
             centralityPenalty -
             confidenceBonus -
-            ageBonus
+            ageBonus -
+            supercomboBonus
     }
 
     private fun isRoadCandidate(
