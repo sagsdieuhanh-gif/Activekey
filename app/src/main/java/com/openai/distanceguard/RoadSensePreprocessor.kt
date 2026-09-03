@@ -3,37 +3,36 @@ package com.openai.distanceguard
 import androidx.camera.core.ImageProxy
 import kotlin.math.pow
 
-/**
- * Compatibility name retained; tensorNchwBgr contains RGB/CHW PicoDet data.
- */
+/** Input plus letterbox metadata for the official YOLOX-Tiny 416x416 ONNX model. */
 data class RoadSenseFrame(
     val tensorNchwBgr: FloatArray,
     val resizeRatio: Float,
+    /** Pixel dimensions of the display-oriented crop passed to Road Core. */
     val displayWidth: Int,
     val displayHeight: Int,
+    /** Crop coordinates in the full display-oriented camera image. */
     val cropLeftNorm: Float = 0f,
     val cropTopNorm: Float = 0f,
     val cropWidthNorm: Float = 1f,
     val cropHeightNorm: Float = 1f,
     val longRangeFront: Boolean = false,
+    /** Mean scene luminance sampled from the camera frame, 0..255. */
     val meanLuma: Float,
+    /** Fraction of sampled pixels with low luminance; helps detect night scenes with bright lamps. */
     val darkRatio: Float,
+    /** True when NIGHT AUTO enhancement was applied. */
     val nightMode: Boolean,
 ) {
-    val displayAspect: Float get() =
-        displayWidth.toFloat() / displayHeight.toFloat().coerceAtLeast(1f)
+    val displayAspect: Float get() = displayWidth.toFloat() / displayHeight.toFloat().coerceAtLeast(1f)
 }
 
 /**
- * Exact PaddleDetection demo_onnxruntime preprocessing:
+ * CameraX RGBA_8888 -> VisionCore BGR/CHW Float32, matching the official VisionCore preproc:
+ * preserve aspect ratio, place resized image at top-left, fill the remaining area with 114.
+ * The model uses raw 0..255 float values (no mean/std normalization).
  *
- * RGB image
- * resize directly to 416x416
- * value = (channel - mean[channel]) / std[channel]
- *
- * mean = [103.53, 116.28, 123.675]
- * std  = [57.375, 57.12, 58.395]
- * then HWC -> CHW.
+ * V14.1 keeps NIGHT AUTO. In dark scenes a mild gamma lift is applied before inference. It is
+ * deliberately conservative so headlamps/signs are not exaggerated too aggressively.
  */
 class RoadSensePreprocessor(
     private val modelSize: Int = 416,
@@ -44,79 +43,83 @@ class RoadSensePreprocessor(
 
     private val nightLut = IntArray(256) { v ->
         val x = v / 255.0
-        (255.0 * x.pow(0.76)).toInt().coerceIn(0, 255)
+        // Stronger shadow lift than V14, still preserving highlight headroom.
+        (255.0 * x.pow(0.68)).toInt().coerceIn(0, 255)
     }
 
     fun preprocess(image: ImageProxy, longRangeFront: Boolean = false): RoadSenseFrame {
         val plane = image.planes[0]
         val buffer = plane.buffer
-        if (scratch.size < buffer.capacity()) scratch = ByteArray(buffer.capacity())
+        val required = buffer.capacity()
+        if (scratch.size < required) scratch = ByteArray(required)
         buffer.rewind()
-        buffer.get(scratch, 0, minOf(buffer.remaining(), scratch.size))
+        val bytesToRead = minOf(buffer.remaining(), scratch.size)
+        buffer.get(scratch, 0, bytesToRead)
 
         val rotation = ((image.imageInfo.rotationDegrees % 360) + 360) % 360
         val fullDisplayW = if (rotation == 90 || rotation == 270) image.height else image.width
         val fullDisplayH = if (rotation == 90 || rotation == 270) image.width else image.height
-
-        val cropLeft = if (longRangeFront) 0.20f else 0f
-        val cropTop = if (longRangeFront) 0.08f else 0f
-        val cropWidth = if (longRangeFront) 0.60f else 1f
-        val cropHeight = if (longRangeFront) 0.76f else 1f
+        // Alternate front long-range crop: spend the same 416x416 detector budget on the central
+        // road corridor so a 60-100 m car occupies more pixels. Full-frame passes still run between
+        // these crops, preserving cut-in/side awareness.
+        val cropLeft = if (longRangeFront) 0.21f else 0f
+        val cropTop = if (longRangeFront) 0.10f else 0f
+        val cropWidth = if (longRangeFront) 0.58f else 1f
+        val cropHeight = if (longRangeFront) 0.74f else 1f
         val displayW = (fullDisplayW * cropWidth).toInt().coerceAtLeast(1)
         val displayH = (fullDisplayH * cropHeight).toInt().coerceAtLeast(1)
+        val ratio = minOf(modelSize.toFloat() / displayW, modelSize.toFloat() / displayH)
+        val resizedW = (displayW * ratio).toInt().coerceIn(1, modelSize)
+        val resizedH = (displayH * ratio).toInt().coerceIn(1, modelSize)
 
-        val light = estimateSceneLight(image, rotation)
-        val meanLuma = light.first
-        val darkRatio = light.second
-        val nightMode = meanLuma < 96f || darkRatio >= 0.48f
+        val sceneLight = estimateSceneLight(image, rotation)
+        val meanLuma = sceneLight.first
+        val darkRatio = sceneLight.second
+        // Mean-only detection missed lamp-lit night scenes. A dark-pixel ratio catches those cases.
+        val nightMode = meanLuma < NIGHT_LUMA_THRESHOLD || darkRatio >= NIGHT_DARK_RATIO_THRESHOLD
 
+        java.util.Arrays.fill(reusableInput, 114f)
         val gOffset = planePixels
-        val bOffset = planePixels * 2
-
-        for (ty in 0 until modelSize) {
-            val v = (ty + 0.5f) / modelSize
-            for (tx in 0 until modelSize) {
-                val u = (tx + 0.5f) / modelSize
-                val du = cropLeft + u * cropWidth
-                val dv = cropTop + v * cropHeight
-
+        val rOffset = planePixels * 2
+        for (ty in 0 until resizedH) {
+            val v = (ty + 0.5f) / resizedH
+            for (tx in 0 until resizedW) {
+                val u = (tx + 0.5f) / resizedW
+                val displayU = cropLeft + u * cropWidth
+                val displayV = cropTop + v * cropHeight
                 val sxNorm: Float
                 val syNorm: Float
                 when (rotation) {
-                    90 -> { sxNorm = dv; syNorm = 1f - du }
-                    180 -> { sxNorm = 1f - du; syNorm = 1f - dv }
-                    270 -> { sxNorm = 1f - dv; syNorm = du }
-                    else -> { sxNorm = du; syNorm = dv }
+                    90 -> { sxNorm = displayV; syNorm = 1f - displayU }
+                    180 -> { sxNorm = 1f - displayU; syNorm = 1f - displayV }
+                    270 -> { sxNorm = 1f - displayV; syNorm = displayU }
+                    else -> { sxNorm = displayU; syNorm = displayV }
                 }
-
                 val sx = (sxNorm * image.width).toInt().coerceIn(0, image.width - 1)
                 val sy = (syNorm * image.height).toInt().coerceIn(0, image.height - 1)
                 val src = sy * plane.rowStride + sx * plane.pixelStride
                 if (src + 2 >= scratch.size) continue
-
-                var r = scratch[src].toInt() and 0xff
-                var g = scratch[src + 1].toInt() and 0xff
-                var b = scratch[src + 2].toInt() and 0xff
-
-                // Keep enhancement conservative; normalization below is the exact official one.
+                var r = scratch[src].toInt() and 0xFF
+                var g = scratch[src + 1].toInt() and 0xFF
+                var b = scratch[src + 2].toInt() and 0xFF
                 if (nightMode) {
                     r = nightLut[r]
                     g = nightLut[g]
                     b = nightLut[b]
                 }
-
                 val dst = ty * modelSize + tx
-
-                // Exact official ONNXRuntime demo constants and channel order.
-                reusableInput[dst] = (r - 103.53f) / 57.375f
-                reusableInput[gOffset + dst] = (g - 116.28f) / 57.12f
-                reusableInput[bOffset + dst] = (b - 123.675f) / 58.395f
+                reusableInput[dst] = b.toFloat()
+                reusableInput[gOffset + dst] = g.toFloat()
+                reusableInput[rOffset + dst] = r.toFloat()
             }
         }
 
+        // MainActivity holds roadUserInferenceBusy from preprocessing through detector completion,
+        // so this large ~4.9 MB tensor cannot be overwritten by a second Road Core pass. Reusing it
+        // avoids a large FloatArray allocation/GC cycle every inference and materially reduces heat.
         return RoadSenseFrame(
             tensorNchwBgr = reusableInput,
-            resizeRatio = 1f,
+            resizeRatio = ratio,
             displayWidth = displayW,
             displayHeight = displayH,
             cropLeftNorm = cropLeft,
@@ -135,12 +138,12 @@ class RoadSensePreprocessor(
         var sum = 0L
         var dark = 0
         var count = 0
-
-        for (gy in 0 until 14) {
-            val v = (gy + 0.5f) / 14f
-            for (gx in 0 until 18) {
-                val u = (gx + 0.5f) / 18f
-
+        val sampleX = 18
+        val sampleY = 14
+        for (gy in 0 until sampleY) {
+            val v = (gy + 0.5f) / sampleY
+            for (gx in 0 until sampleX) {
+                val u = (gx + 0.5f) / sampleX
                 val sxNorm: Float
                 val syNorm: Float
                 when (rotation) {
@@ -149,24 +152,28 @@ class RoadSensePreprocessor(
                     270 -> { sxNorm = 1f - v; syNorm = u }
                     else -> { sxNorm = u; syNorm = v }
                 }
-
                 val sx = (sxNorm * image.width).toInt().coerceIn(0, image.width - 1)
                 val sy = (syNorm * image.height).toInt().coerceIn(0, image.height - 1)
                 val src = sy * plane.rowStride + sx * plane.pixelStride
                 if (src + 2 >= scratch.size) continue
-
-                val r = scratch[src].toInt() and 0xff
-                val g = scratch[src + 1].toInt() and 0xff
-                val b = scratch[src + 2].toInt() and 0xff
+                val r = scratch[src].toInt() and 0xFF
+                val g = scratch[src + 1].toInt() and 0xFF
+                val b = scratch[src + 2].toInt() and 0xFF
                 val luma = ((54 * r + 183 * g + 19 * b) shr 8)
-
                 sum += luma
-                if (luma < 72) dark++
+                if (luma < NIGHT_DARK_PIXEL_LUMA) dark++
                 count++
             }
         }
-
         if (count == 0) return 128f to 0f
         return (sum.toFloat() / count) to (dark.toFloat() / count)
+    }
+
+    companion object {
+        // Raised from V14's 72 because street/head lamps made true night scenes look too bright
+        // to the arithmetic mean. Dark-ratio is an additional guard against that failure.
+        private const val NIGHT_LUMA_THRESHOLD = 100f
+        private const val NIGHT_DARK_RATIO_THRESHOLD = 0.48f
+        private const val NIGHT_DARK_PIXEL_LUMA = 72
     }
 }

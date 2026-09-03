@@ -1,4 +1,4 @@
-name: TrungKien V15.7B PicoDet Vehicle Test
+name: TrungKien V15.8 YOLOX Tiny Stability Test
 
 on:
   workflow_dispatch:
@@ -26,20 +26,21 @@ jobs:
       - name: Install Android SDK packages
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Stage official PicoDet-M 416
+      - name: Stage official YOLOX-Tiny 416
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p app/offline_models
-          curl -L --fail --retry 4 --connect-timeout 30 \
-            "https://paddledet.bj.bcebos.com/deploy/third_engine/picodet_m_416_lcnet_postprocessed.onnx" \
+
+          curl -L --fail --retry 5 --connect-timeout 30 \
+            "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx" \
             -o app/offline_models/road_core.dat
 
           SIZE="$(stat -c%s app/offline_models/road_core.dat)"
-          test "$SIZE" -gt 1000000
-          test "$SIZE" -lt 80000000
+          test "$SIZE" -gt 5000000
+          test "$SIZE" -lt 50000000
 
-          echo "PicoDet-M416 size: $SIZE"
+          echo "YOLOX-Tiny size: $SIZE"
           sha256sum app/offline_models/road_core.dat
 
       - name: Stage exact FP32 UFLD CULane
@@ -48,7 +49,7 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/ufld app/offline_models
 
-          curl -L --fail --retry 4 --connect-timeout 30 \
+          curl -L --fail --retry 5 --connect-timeout 30 \
             "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/140_Ultra-Fast-Lane-Detection/resources_culane.tar.gz" \
             -o /tmp/ufld.tar.gz
 
@@ -56,13 +57,12 @@ jobs:
 
           MODEL="/tmp/ufld/saved_model_culane/ultra_falst_lane_detection_culane_288x800.onnx"
           test -f "$MODEL"
-
           cp "$MODEL" app/offline_models/lane_core.dat
 
           test "$(stat -c%s app/offline_models/lane_core.dat)" = "178076232"
           echo "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  app/offline_models/lane_core.dat" | sha256sum -c -
 
-      - name: Build TrungKien V15.7B APK
+      - name: Build V15.8
         run: gradle --no-daemon clean assembleDebug
 
       - name: Verify models inside APK
@@ -72,24 +72,22 @@ jobs:
 
           APK="app/build/outputs/apk/debug/app-debug.apk"
           test -f "$APK"
-          ls -lh "$APK"
 
           unzip -p "$APK" assets/road_core.dat > /tmp/road_core_from_apk.dat
           cmp -s app/offline_models/road_core.dat /tmp/road_core_from_apk.dat
-          echo "PASS: PicoDet-M416 is inside APK"
+          echo "PASS: exact YOLOX-Tiny is inside APK"
 
           unzip -p "$APK" assets/lane_core.dat > /tmp/lane_core_from_apk.dat
           test "$(stat -c%s /tmp/lane_core_from_apk.dat)" = "178076232"
           echo "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  /tmp/lane_core_from_apk.dat" | sha256sum -c -
-          echo "PASS: UFLD CULane is inside APK"
 
-      - name: Prepare APK filename
+      - name: Prepare APK
         run: |
           cp \
             "app/build/outputs/apk/debug/app-debug.apk" \
-            "app/build/outputs/apk/debug/TrungKien V15.7B PicoDet.apk"
+            "app/build/outputs/apk/debug/TrungKien V15.8 YOLOX Tiny.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TrungKien-V15.7B-PicoDet
-          path: "app/build/outputs/apk/debug/TrungKien V15.7B PicoDet.apk"
+          name: TrungKien-V15.8-YOLOX-Tiny
+          path: "app/build/outputs/apk/debug/TrungKien V15.8 YOLOX Tiny.apk"

@@ -20,8 +20,8 @@ android {
         ndk {
             abiFilters += "arm64-v8a"
         }
-        versionCode = 1572
-        versionName = "15.7.2"
+        versionCode = 1580
+        versionName = "15.8.0"
     }
 
     buildTypes {
@@ -93,7 +93,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
                 connectTimeout = 30_000
                 readTimeout = 180_000
                 instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "TrungKien-V15.7C-PicoDet/15.7.2")
+                setRequestProperty("User-Agent", "TrungKien-V15.8-YOLOX-Tiny/15.8.0")
                 setRequestProperty("Accept", "application/octet-stream")
             }
             try {
@@ -117,31 +117,31 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
             }
         }
 
-        fun picoDetValid(file: File): Boolean =
-            file.exists() && file.length() in 1_000_000L..80_000_000L
+        fun tinyValid(file: File): Boolean =
+            file.exists() && file.length() in 5_000_000L..50_000_000L
 
         val manualVision = manualAssets.resolve("road_core.dat")
 
-        // Never reuse generated road_core.dat from an older YOLOX build.
+        // Always rebuild ROAD CORE from the intended Tiny package.
         visionOut.delete()
 
-        if (picoDetValid(manualVision)) {
+        if (tinyValid(manualVision)) {
             manualVision.copyTo(visionOut, overwrite = true)
         } else {
-            logger.lifecycle("TRUNGKIEN V15.7B: downloading official PicoDet-M416...")
+            logger.lifecycle("TRUNGKIEN V15.8: downloading official YOLOX-Tiny 416...")
             download(
-                "https://paddledet.bj.bcebos.com/deploy/third_engine/picodet_m_416_lcnet_postprocessed.onnx",
-                visionOut
+                "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx",
+                visionOut,
             )
         }
 
-        if (!picoDetValid(visionOut)) {
+        if (!tinyValid(visionOut)) {
             visionOut.delete()
-            throw org.gradle.api.GradleException("PicoDet-M416 Road Core invalid.")
+            throw org.gradle.api.GradleException("YOLOX-Tiny Road Core invalid.")
         }
 
         logger.lifecycle(
-            "TRUNGKIEN V15.7B: PicoDet Road Core ready (${visionOut.length()} bytes, SHA256 ${sha256(visionOut)})"
+            "TRUNGKIEN V15.8: YOLOX-Tiny ready (${visionOut.length()} bytes, SHA256 ${sha256(visionOut)})."
         )
 
         val laneExpectedSize = 178_076_232L
@@ -170,9 +170,7 @@ val prepareCorePackages = tasks.register("prepareCorePackages") {
             throw org.gradle.api.GradleException("Lane Core invalid.")
         }
 
-        logger.lifecycle(
-            "TRUNGKIEN V15.7B: Lane Core ready (${laneOut.length() / 1024 / 1024} MiB)."
-        )
+        logger.lifecycle("TRUNGKIEN V15.8: Lane Core ready.")
     }
 }
 
