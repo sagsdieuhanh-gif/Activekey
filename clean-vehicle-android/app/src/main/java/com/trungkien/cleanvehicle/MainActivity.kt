@@ -43,6 +43,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var modeButton:
         TextView
 
+    private lateinit var menuButton:
+        TextView
+
     private val analyzerExecutor =
         Executors.newSingleThreadExecutor()
 
@@ -313,7 +316,7 @@ class MainActivity : ComponentActivity() {
                 )
 
                 text =
-                    "TRUNGKIEN ADAS V2.2 KEY\nĐANG NẠP..."
+                    "TRUNGKIEN ADAS V2.3 MENU\nĐANG NẠP..."
             }
 
         modeButton =
@@ -365,6 +368,41 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+        menuButton =
+            TextView(
+                this
+            ).apply {
+                setTextColor(
+                    Color.WHITE
+                )
+
+                setBackgroundColor(
+                    Color.argb(
+                        190,
+                        20,
+                        80,
+                        140,
+                    )
+                )
+
+                textSize =
+                    14f
+
+                setPadding(
+                    20,
+                    13,
+                    20,
+                    13,
+                )
+
+                text =
+                    "MENU"
+
+                setOnClickListener {
+                    showAdasMenu()
+                }
+            }
+
         root.addView(
             previewView,
             FrameLayout.LayoutParams(
@@ -403,6 +441,22 @@ class MainActivity : ComponentActivity() {
                     12
 
                 marginEnd =
+                    118
+            }
+        )
+
+        root.addView(
+            menuButton,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or
+                    Gravity.END,
+            ).apply {
+                topMargin =
+                    12
+
+                marginEnd =
                     12
             }
         )
@@ -412,9 +466,51 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private fun showAdasMenu() {
+        licenseManager.stopTrialClock()
+
+        AdasMenuDialog(
+            context = this,
+            licenseManager = licenseManager,
+            currentDebugMode = debugMode,
+            onDebugChanged = {
+                enabled ->
+                debugMode =
+                    enabled
+
+                modeButton.text =
+                    if (
+                        enabled
+                    ) {
+                        "DEBUG"
+                    } else {
+                        "DRIVE"
+                    }
+
+                overlay.setDebugMode(
+                    enabled
+                )
+            },
+            onLicenseActivated = {
+                recreate()
+            },
+        ).apply {
+            setOnDismissListener {
+                if (
+                    !licenseManager.isLicensed() &&
+                    licenseManager.hasAccess()
+                ) {
+                    licenseManager.startTrialClock()
+                }
+            }
+
+            show()
+        }
+    }
+
     private fun loadModels() {
         status.text =
-            "TRUNGKIEN ADAS V2.2 KEY\nĐANG NẠP YOLOX + UFLD..."
+            "TRUNGKIEN ADAS V2.3 MENU\nĐANG NẠP YOLOX + UFLD..."
 
         modelExecutor.execute {
             runCatching {
@@ -788,7 +884,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         buildString {
                             append(
-                                "TRUNGKIEN ADAS V2.2 KEY\n"
+                                "TRUNGKIEN ADAS V2.3 MENU\n"
                             )
 
                             append(
@@ -916,7 +1012,7 @@ class MainActivity : ComponentActivity() {
                     } else {
                         buildString {
                             append(
-                                "ADAS V2.2"
+                                "ADAS V2.3"
                             )
 
                             append(
