@@ -677,7 +677,7 @@ class MainActivity : ComponentActivity() {
         }
 
         dialog = AlertDialog.Builder(this)
-            .setTitle("TRUNGKIEN V15.1 • ĐIỀU KHIỂN")
+            .setTitle("TRUNGKIEN V15.3 • ĐIỀU KHIỂN")
             .setView(scroll)
             .setNegativeButton("ĐÓNG", null)
             .create()
@@ -1041,8 +1041,8 @@ class MainActivity : ComponentActivity() {
             }
             val calibrationSnapshot = autoResult.calibration
 
-            // Lane Core path uses a horizon/roll-normalized 2:1 road crop instead of
-            // stretching the entire 4:3 or portrait image into the model input.
+            // V15.3: AUTO GÓC điều khiển vùng mặt đường đưa vào Lane Core.
+            // Không còn kéo toàn bộ ảnh camera dọc vào model.
             val laneEngine = laneCoreEngine
             if (laneEngine != null && timestamp - lastLaneSubmitNs >= thermalProfile.laneIntervalNs && laneInferenceBusy.compareAndSet(false, true)) {
                 lastLaneSubmitNs = timestamp
@@ -1050,15 +1050,20 @@ class MainActivity : ComponentActivity() {
                 val aspect = laneCoreEnginePreprocessor.displayAspect
                 laneExecutor.execute {
                     try {
-                        val road = laneEngine.infer(laneInput)
+                        val roadRaw = laneEngine.infer(laneInput)
+                        val road = laneCoreEnginePreprocessor.remapOutput(roadRaw)
                         val state = laneCoreEngineInterpreter.interpret(
                             road, calibrationSnapshot, aspect, timestamp, egoSpeed,
                         )
                         latestLaneSenseLane.set(StampedLane(state, timestamp))
                         latestMetricLead.set(StampedLead(road.lead, timestamp))
                         runOnUiThread {
+                            val rawLeft = ((road.laneProbabilities.getOrNull(1) ?: 0f) * 100f).roundToInt()
+                            val rawRight = ((road.laneProbabilities.getOrNull(2) ?: 0f) * 100f).roundToInt()
                             laneModelStatus.text = if (state.confidence >= 0.25f) {
                                 "LÀN: CORE ${laneEngine.acceleratorName} • ${(state.confidence * 100f).roundToInt()}%"
+                            } else if (rawLeft > 0 || rawRight > 0) {
+                                "LÀN: CORE • trái ${rawLeft}% • phải ${rawRight}%"
                             } else {
                                 "LÀN: CORE • chưa xác định vạch"
                             }

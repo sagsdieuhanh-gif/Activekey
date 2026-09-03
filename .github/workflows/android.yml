@@ -1,4 +1,4 @@
-name: TRUNGKIEN V15.2.1 Lane Core Runtime Hotfix
+name: TRUNGKIEN V15.3 Portrait Lane Input Fix
 
 on:
   workflow_dispatch:
@@ -20,7 +20,7 @@ jobs:
           gradle-version: '9.5.0'
       - name: Install Android SDK packages
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-      - name: Stage V15.2.1 exact FP32 UFLD CULane model
+      - name: Stage V15.3 exact SAME FP32 UFLD CULane model
         shell: bash
         run: |
           set -euo pipefail
@@ -37,7 +37,7 @@ jobs:
           echo "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  app/offline_models/lane_core.dat" | sha256sum -c -
 
           echo "Dedicated lane model VERIFIED: $MODEL ($(du -h app/offline_models/lane_core.dat | cut -f1))"
-      - name: Build V15.2.1 ARM64 APK
+      - name: Build V15.3 ARM64 APK
         run: gradle --no-daemon clean assembleDebug
       - name: Verify Lane Core inside APK
         run: |
@@ -52,5 +52,5 @@ jobs:
           echo "PASS: exact FP32 Lane Core is physically inside the APK."
       - uses: actions/upload-artifact@v4
         with:
-          name: TRUNGKIEN-V15.2.1-lane-core-hotfix-apk
+          name: TRUNGKIEN-V15.3-portrait-lane-apk
           path: app/build/outputs/apk/debug/app-debug.apk
