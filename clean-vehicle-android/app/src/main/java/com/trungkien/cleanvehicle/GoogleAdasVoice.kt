@@ -21,6 +21,10 @@ class GoogleAdasVoice(
     private var ready =
         false
 
+    @Volatile
+    private var googleEngine =
+        false
+
     private var tts:
         TextToSpeech? =
         null
@@ -33,12 +37,14 @@ class GoogleAdasVoice(
         tts =
             TextToSpeech(
                 context.applicationContext,
-                {
-                    status ->
+                { status ->
                     if (
                         status ==
                         TextToSpeech.SUCCESS
                     ) {
+                        googleEngine =
+                            true
+
                         configure()
                     } else {
                         initFallback()
@@ -56,8 +62,10 @@ class GoogleAdasVoice(
         tts =
             TextToSpeech(
                 context.applicationContext,
-            ) {
-                status ->
+            ) { status ->
+                googleEngine =
+                    false
+
                 if (
                     status ==
                     TextToSpeech.SUCCESS
@@ -77,15 +85,15 @@ class GoogleAdasVoice(
                 "VN",
             )
 
-        val result =
+        val language =
             engine.setLanguage(
                 locale
             )
 
         if (
-            result ==
+            language ==
                 TextToSpeech.LANG_MISSING_DATA ||
-            result ==
+            language ==
                 TextToSpeech.LANG_NOT_SUPPORTED
         ) {
             ready =
@@ -94,10 +102,11 @@ class GoogleAdasVoice(
             return
         }
 
-        val candidate =
+        val voice =
             runCatching {
                 engine.voices
-            }.getOrNull()
+            }
+                .getOrNull()
                 .orEmpty()
                 .filter {
                     it.locale.language ==
@@ -105,22 +114,14 @@ class GoogleAdasVoice(
                 }
                 .sortedWith(
                     compareByDescending<Voice> {
-                        voice ->
+                        item ->
                         val name =
-                            voice.name.lowercase()
+                            item.name.lowercase()
 
-                        name.contains(
-                            "female"
-                        ) ||
-                            name.contains(
-                                "woman"
-                            ) ||
-                            name.contains(
-                                "nữ"
-                            ) ||
-                            name.contains(
-                                "nu"
-                            )
+                        name.contains("female") ||
+                            name.contains("woman") ||
+                            name.contains("nữ") ||
+                            name.contains("nu")
                     }.thenByDescending {
                         it.quality
                     }
@@ -128,12 +129,12 @@ class GoogleAdasVoice(
                 .firstOrNull()
 
         if (
-            candidate !=
+            voice !=
             null
         ) {
             runCatching {
                 engine.voice =
-                    candidate
+                    voice
             }
         }
 
@@ -147,6 +148,14 @@ class GoogleAdasVoice(
 
         ready =
             true
+    }
+
+    fun calibrationSuccess() {
+        speak(
+            "Hiệu chỉnh camera thành công",
+            0L,
+            "camera_calibration_success",
+        )
     }
 
     fun leadMoved() {
@@ -165,6 +174,14 @@ class GoogleAdasVoice(
         )
     }
 
+    fun headwayTooClose() {
+        speak(
+            "Khoảng cách quá gần",
+            0L,
+            "headway_too_close",
+        )
+    }
+
     fun laneDeparture() {
         speak(
             "Chú ý lệch làn",
@@ -173,10 +190,19 @@ class GoogleAdasVoice(
         )
     }
 
+    fun engineLabel(): String =
+        if (
+            googleEngine
+        ) {
+            "GOOGLE TTS"
+        } else {
+            "TTS MẶC ĐỊNH"
+        }
+
     private fun speak(
         text: String,
         delayMs: Long,
-        utteranceId: String,
+        id: String,
     ) {
         handler.postDelayed({
             val engine =
@@ -200,7 +226,7 @@ class GoogleAdasVoice(
                 text,
                 TextToSpeech.QUEUE_FLUSH,
                 params,
-                utteranceId,
+                id,
             )
         }, delayMs)
     }

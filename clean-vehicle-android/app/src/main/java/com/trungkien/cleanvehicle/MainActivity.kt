@@ -40,10 +40,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var status:
         TextView
 
-    private lateinit var modeButton:
-        TextView
-
-    private lateinit var menuButton:
+    private lateinit var settingsButton:
         TextView
 
     private val analyzerExecutor =
@@ -105,14 +102,10 @@ class MainActivity : ComponentActivity() {
     private var laneCounter =
         0L
 
-    @Volatile
-    private var cameraRunning =
-        false
-
     private var analysisCounter =
         0L
 
-    private var debugMode =
+    private var technicalInfo =
         false
 
     private var previousHmwWarning =
@@ -121,11 +114,13 @@ class MainActivity : ComponentActivity() {
     private var previousLdwWarning =
         false
 
+    private var calibrationWasLocked =
+        false
+
     private val permissionLauncher =
         registerForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
-        ) {
-            result ->
+        ) { result ->
             val cameraGranted =
                 result[
                     Manifest.permission.CAMERA
@@ -180,6 +175,9 @@ class MainActivity : ComponentActivity() {
                 this
             )
 
+        calibrationWasLocked =
+            calibrator.geometry.locked
+
         voice =
             GoogleAdasVoice(
                 this
@@ -209,7 +207,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun buildLicenseGate() {
-        @Suppress("DEPRECATION")
+        @Suppress(
+            "DEPRECATION"
+        )
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_FULLSCREEN or
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
@@ -217,8 +217,10 @@ class MainActivity : ComponentActivity() {
 
         setContentView(
             AdasLicenseGateView(
-                context = this,
-                licenseManager = licenseManager,
+                context =
+                    this,
+                licenseManager =
+                    licenseManager,
                 onActivated = {
                     recreate()
                 },
@@ -298,77 +300,28 @@ class MainActivity : ComponentActivity() {
 
                 setBackgroundColor(
                     Color.argb(
-                        175,
-                        0,
-                        0,
-                        0,
-                    )
-                )
-
-                textSize =
-                    13f
-
-                setPadding(
-                    18,
-                    12,
-                    18,
-                    12,
-                )
-
-                text =
-                    "TRUNGKIEN ADAS V2.3 MENU\nĐANG NẠP..."
-            }
-
-        modeButton =
-            TextView(
-                this
-            ).apply {
-                setTextColor(
-                    Color.WHITE
-                )
-
-                setBackgroundColor(
-                    Color.argb(
-                        185,
-                        0,
                         120,
-                        85,
+                        0,
+                        0,
+                        0,
                     )
                 )
 
                 textSize =
-                    14f
+                    12f
 
                 setPadding(
-                    20,
-                    13,
-                    20,
-                    13,
+                    12,
+                    8,
+                    12,
+                    8,
                 )
 
                 text =
-                    "DRIVE"
-
-                setOnClickListener {
-                    debugMode =
-                        !debugMode
-
-                    text =
-                        if (
-                            debugMode
-                        ) {
-                            "DEBUG"
-                        } else {
-                            "DRIVE"
-                        }
-
-                    this@MainActivity.overlay.setDebugMode(
-                        debugMode
-                    )
-                }
+                    "TrungKien ADAS • ĐANG NẠP..."
             }
 
-        menuButton =
+        settingsButton =
             TextView(
                 this
             ).apply {
@@ -378,10 +331,10 @@ class MainActivity : ComponentActivity() {
 
                 setBackgroundColor(
                     Color.argb(
-                        190,
-                        20,
-                        80,
-                        140,
+                        195,
+                        0,
+                        105,
+                        92,
                     )
                 )
 
@@ -389,17 +342,17 @@ class MainActivity : ComponentActivity() {
                     14f
 
                 setPadding(
-                    20,
-                    13,
-                    20,
-                    13,
+                    18,
+                    12,
+                    18,
+                    12,
                 )
 
                 text =
-                    "MENU"
+                    "⚙ CÀI ĐẶT"
 
                 setOnClickListener {
-                    showAdasMenu()
+                    showSettings()
                 }
             }
 
@@ -424,29 +377,19 @@ class MainActivity : ComponentActivity() {
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP or
+                Gravity.BOTTOM or
                     Gravity.START,
-            )
-        )
-
-        root.addView(
-            modeButton,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP or
-                    Gravity.END,
             ).apply {
-                topMargin =
-                    12
+                bottomMargin =
+                    10
 
-                marginEnd =
-                    118
+                marginStart =
+                    10
             }
         )
 
         root.addView(
-            menuButton,
+            settingsButton,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -466,28 +409,24 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    private fun showAdasMenu() {
+    private fun showSettings() {
         licenseManager.stopTrialClock()
 
-        AdasMenuDialog(
-            context = this,
-            licenseManager = licenseManager,
-            currentDebugMode = debugMode,
-            onDebugChanged = {
+        AdasSettingsDialog(
+            context =
+                this,
+            licenseManager =
+                licenseManager,
+            voice =
+                voice,
+            technicalEnabled =
+                technicalInfo,
+            onTechnicalChanged = {
                 enabled ->
-                debugMode =
+                technicalInfo =
                     enabled
 
-                modeButton.text =
-                    if (
-                        enabled
-                    ) {
-                        "DEBUG"
-                    } else {
-                        "DRIVE"
-                    }
-
-                overlay.setDebugMode(
+                overlay.setTechnicalInfo(
                     enabled
                 )
             },
@@ -510,14 +449,14 @@ class MainActivity : ComponentActivity() {
 
     private fun loadModels() {
         status.text =
-            "TRUNGKIEN ADAS V2.3 MENU\nĐANG NẠP YOLOX + UFLD..."
+            "TrungKien ADAS • ĐANG NẠP AI..."
 
         modelExecutor.execute {
             runCatching {
                 val roadFile =
                     copyAsset(
                         "yolox_tiny.onnx",
-                        "yolox_tiny_adas_v20.onnx",
+                        "yolox_tiny_trungkien_adas.onnx",
                         5_000_000L,
                     )
 
@@ -530,8 +469,7 @@ class MainActivity : ComponentActivity() {
                     UfldLaneDetector(
                         laneFile
                     )
-            }.onSuccess {
-                models ->
+            }.onSuccess { models ->
                 roadDetector =
                     models.first
 
@@ -541,12 +479,10 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread {
                     startCamera()
                 }
-            }.onFailure {
-                error ->
+            }.onFailure { error ->
                 runOnUiThread {
                     status.text =
-                        "LỖI MODEL\n" +
-                            "${error.javaClass.simpleName}: ${error.message}"
+                        "LỖI MODEL • ${error.javaClass.simpleName}: ${error.message}"
                 }
             }
         }
@@ -563,12 +499,18 @@ class MainActivity : ComponentActivity() {
                 targetName,
             )
 
+        if (
+            target.exists() &&
+            target.length() >
+                minimumSize
+        ) {
+            return target
+        }
+
         assets.open(
             assetName
-        ).use {
-            input ->
-            target.outputStream().use {
-                output ->
+        ).use { input ->
+            target.outputStream().use { output ->
                 input.copyTo(
                     output,
                     256 *
@@ -589,7 +531,7 @@ class MainActivity : ComponentActivity() {
         val target =
             File(
                 filesDir,
-                "ufld_culane_adas_v20.onnx",
+                "ufld_culane_trungkien_adas.onnx",
             )
 
         if (
@@ -602,10 +544,8 @@ class MainActivity : ComponentActivity() {
 
         assets.open(
             "ufld_culane.onnx"
-        ).use {
-            input ->
-            target.outputStream().use {
-                output ->
+        ).use { input ->
+            target.outputStream().use { output ->
                 input.copyTo(
                     output,
                     512 *
@@ -689,13 +629,9 @@ class MainActivity : ComponentActivity() {
                     preview,
                     analysis,
                 )
-
-                cameraRunning =
-                    true
-            }.onFailure {
-                error ->
+            }.onFailure { error ->
                 status.text =
-                    "LỖI CAMERA\n${error.message}"
+                    "LỖI CAMERA • ${error.message}"
             }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -784,6 +720,23 @@ class MainActivity : ComponentActivity() {
                     laneResult
                 )
 
+                val lockedNow =
+                    calibrator.geometry.locked
+
+                if (
+                    !calibrationWasLocked &&
+                    lockedNow
+                ) {
+                    calibrationWasLocked =
+                        true
+
+                    voice.calibrationSuccess()
+
+                    runOnUiThread {
+                        overlay.showCalibrationSuccess()
+                    }
+                }
+
                 runOnUiThread {
                     overlay.updateLane(
                         laneResult
@@ -799,8 +752,7 @@ class MainActivity : ComponentActivity() {
 
             runOnUiThread {
                 status.text =
-                    "AI ERROR\n" +
-                        "${error.javaClass.simpleName}: ${error.message}"
+                    "AI ERROR • ${error.javaClass.simpleName}: ${error.message}"
             }
         } finally {
             image.close()
@@ -847,6 +799,7 @@ class MainActivity : ComponentActivity() {
                 0
         ) {
             beeper.headwayCue()
+            voice.headwayTooClose()
         }
 
         previousHmwWarning =
@@ -875,20 +828,21 @@ class MainActivity : ComponentActivity() {
                 val snapshot =
                     latestSnapshot
 
-                val lane =
-                    snapshot.lane
-
                 status.text =
                     if (
-                        debugMode
+                        technicalInfo
                     ) {
                         buildString {
                             append(
-                                "TRUNGKIEN ADAS V2.3 MENU\n"
+                                "TrungKien ADAS • "
                             )
 
                             append(
-                                "GPS "
+                                licenseStatusText()
+                            )
+
+                            append(
+                                " • GPS "
                             )
 
                             append(
@@ -898,7 +852,7 @@ class MainActivity : ComponentActivity() {
                             )
 
                             append(
-                                " km/h • ROAD "
+                                " km/h • AI "
                             )
 
                             append(
@@ -907,69 +861,7 @@ class MainActivity : ComponentActivity() {
                             )
 
                             append(
-                                " ms #"
-                            )
-
-                            append(
-                                roadCounter
-                            )
-
-                            append(
-                                "\nAUTO "
-                            )
-
-                            append(
-                                if (
-                                    lane.locked
-                                ) {
-                                    "LOCK"
-                                } else {
-                                    "LEARN"
-                                }
-                            )
-
-                            append(
-                                " H="
-                            )
-
-                            append(
-                                String.format(
-                                    Locale.US,
-                                    "%.2f",
-                                    lane.horizonNorm,
-                                )
-                            )
-
-                            append(
-                                " ROLL="
-                            )
-
-                            append(
-                                String.format(
-                                    Locale.US,
-                                    "%.1f°",
-                                    lane.rollDeg,
-                                )
-                            )
-
-                            append(
-                                " CONF="
-                            )
-
-                            append(
-                                (
-                                    lane.confidence *
-                                        100f
-                                    )
-                                    .roundToInt()
-                            )
-
-                            append(
-                                "%"
-                            )
-
-                            append(
-                                "\nLANE "
+                                "ms • LANE "
                             )
 
                             append(
@@ -978,45 +870,31 @@ class MainActivity : ComponentActivity() {
                             )
 
                             append(
-                                " ms #"
+                                "ms • CAL "
                             )
 
                             append(
-                                laneCounter
+                                if (
+                                    snapshot.lane.locked
+                                ) {
+                                    "OK"
+                                } else {
+                                    "${snapshot.lane.samples}/12"
+                                }
                             )
 
                             append(
-                                " • HOOD "
-                            )
-
-                            append(
-                                String.format(
-                                    Locale.US,
-                                    "%.2f",
-                                    snapshot.hoodTopNorm,
-                                )
-                            )
-
-                            append(
-                                "\n"
+                                " • "
                             )
 
                             append(
                                 snapshot.debugText
                             )
-
-                            appendLeadNumbers(
-                                snapshot
-                            )
                         }
                     } else {
                         buildString {
                             append(
-                                "ADAS V2.3"
-                            )
-
-                            append(
-                                " • "
+                                "TrungKien ADAS • "
                             )
 
                             append(
@@ -1028,27 +906,13 @@ class MainActivity : ComponentActivity() {
                             )
 
                             append(
-                                snapshot.speedKph
-                                    ?.roundToInt()
-                                    ?: 0
-                            )
-
-                            append(
-                                " km/h"
-                            )
-
-                            append(
                                 if (
-                                    lane.locked
+                                    snapshot.lane.locked
                                 ) {
-                                    " • CAL"
+                                    "CAL OK"
                                 } else {
-                                    " • CAL..."
+                                    "ĐANG HIỆU CHỈNH"
                                 }
-                            )
-
-                            appendLeadNumbers(
-                                snapshot
                             )
                         }
                     }
@@ -1074,94 +938,13 @@ class MainActivity : ComponentActivity() {
                 ) /
                 1000L
 
-        return "TRIAL %02d:%02d".format(
+        return "DÙNG THỬ %02d:%02d".format(
             Locale.US,
-            totalSeconds / 60L,
-            totalSeconds % 60L,
+            totalSeconds /
+                60L,
+            totalSeconds %
+                60L,
         )
-    }
-
-    private fun StringBuilder.appendLeadNumbers(
-        snapshot: AdasSnapshot,
-    ) {
-        val lead =
-            snapshot.lead
-
-        if (
-            lead !=
-            null
-        ) {
-            append(
-                "\nFRONT ≈ "
-            )
-
-            append(
-                String.format(
-                    Locale.US,
-                    "%.1f m",
-                    lead.distanceMeters,
-                )
-            )
-
-            if (
-                snapshot.headwaySeconds !=
-                null
-            ) {
-                append(
-                    " • HMW "
-                )
-
-                append(
-                    String.format(
-                        Locale.US,
-                        "%.1f s",
-                        snapshot.headwaySeconds,
-                    )
-                )
-            }
-
-            if (
-                snapshot.ttcSeconds !=
-                null
-            ) {
-                append(
-                    " • TTC "
-                )
-
-                append(
-                    String.format(
-                        Locale.US,
-                        "%.1f s",
-                        snapshot.ttcSeconds,
-                    )
-                )
-
-                append(
-                    " • FCW "
-                )
-
-                append(
-                    snapshot.warnings.fcwLevel
-                )
-            }
-        }
-
-        if (
-            snapshot.timeToLaneCrossSeconds !=
-            null
-        ) {
-            append(
-                "\nTLC "
-            )
-
-            append(
-                String.format(
-                    Locale.US,
-                    "%.1f s",
-                    snapshot.timeToLaneCrossSeconds,
-                )
-            )
-        }
     }
 
     override fun onResume() {
@@ -1217,12 +1000,6 @@ class MainActivity : ComponentActivity() {
         roadDetector?.close()
 
         laneDetector?.close()
-
-        roadDetector =
-            null
-
-        laneDetector =
-            null
 
         analyzerExecutor.shutdownNow()
 

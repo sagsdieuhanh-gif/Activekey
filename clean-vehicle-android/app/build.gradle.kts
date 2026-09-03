@@ -7,12 +7,34 @@ android {
     namespace = "com.trungkien.cleanvehicle"
     compileSdk = 36
 
+    signingConfigs {
+        create("release") {
+            storeFile =
+                file(
+                    System.getenv("TK_ADAS_KEYSTORE_FILE")
+                        ?: "trungkien-release.jks"
+                )
+
+            storePassword =
+                System.getenv("TK_ADAS_KEYSTORE_PASSWORD")
+                    ?: ""
+
+            keyAlias =
+                System.getenv("TK_ADAS_KEY_ALIAS")
+                    ?: "trungkienadas"
+
+            keyPassword =
+                System.getenv("TK_ADAS_KEY_PASSWORD")
+                    ?: ""
+        }
+    }
+
     defaultConfig {
-        applicationId = "com.trungkien.adas.v231menu"
+        applicationId = "com.trungkien.adas"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2311
-        versionName = "2.3.1"
+        versionCode = 2400
+        versionName = "2.4.0"
 
         ndk {
             abiFilters += "arm64-v8a"
@@ -26,23 +48,35 @@ android {
 
         release {
             isMinifyEnabled = false
+            signingConfig =
+                signingConfigs.getByName(
+                    "release"
+                )
         }
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility =
+            JavaVersion.VERSION_17
+
+        targetCompatibility =
+            JavaVersion.VERSION_17
     }
 
     packaging {
         jniLibs {
-            pickFirsts += setOf("**/libc++_shared.so")
+            pickFirsts +=
+                setOf(
+                    "**/libc++_shared.so"
+                )
         }
     }
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(
+        17
+    )
 }
 
 dependencies {

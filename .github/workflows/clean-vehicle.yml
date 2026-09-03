@@ -1,4 +1,4 @@
-name: TrungKien ADAS V2.3.1 MENU FIX2
+name: TrungKien ADAS Stable
 
 on:
   workflow_dispatch:
@@ -29,7 +29,7 @@ jobs:
       - name: Install Android SDK
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
 
-      - name: Download models
+      - name: Download YOLOX and UFLD
         shell: bash
         run: |
           set -euo pipefail
@@ -60,23 +60,53 @@ jobs:
             "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  clean-vehicle-android/app/src/main/assets/ufld_culane.onnx" \
             | sha256sum -c -
 
-      - name: Build ADAS V2.3.1
-        working-directory: clean-vehicle-android
-        run: gradle --no-daemon clean :app:assembleDebug --stacktrace
+      - name: Restore stable signing key
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.TK_ADAS_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_B64"
+          echo "$KEYSTORE_B64" | base64 -d > clean-vehicle-android/app/trungkien-release.jks
+          test -s clean-vehicle-android/app/trungkien-release.jks
 
-      - name: Prepare APK
+      - name: Print signing certificate fingerprint
+        shell: bash
+        env:
+          STORE_PASSWORD: ${{ secrets.TK_ADAS_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.TK_ADAS_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          keytool -list -v \
+            -keystore clean-vehicle-android/app/trungkien-release.jks \
+            -storepass "$STORE_PASSWORD" \
+            -alias "$KEY_ALIAS" \
+            | grep -E "SHA256:|Alias name:"
+
+      - name: Build signed TrungKien ADAS release
+        working-directory: clean-vehicle-android
+        env:
+          TK_ADAS_KEYSTORE_FILE: trungkien-release.jks
+          TK_ADAS_KEYSTORE_PASSWORD: ${{ secrets.TK_ADAS_KEYSTORE_PASSWORD }}
+          TK_ADAS_KEY_ALIAS: ${{ secrets.TK_ADAS_KEY_ALIAS }}
+          TK_ADAS_KEY_PASSWORD: ${{ secrets.TK_ADAS_KEY_PASSWORD }}
+        run: gradle --no-daemon clean :app:assembleRelease --stacktrace
+
+      - name: Verify signed APK
         shell: bash
         run: |
           set -euo pipefail
 
-          APK="clean-vehicle-android/app/build/outputs/apk/debug/app-debug.apk"
+          APK="clean-vehicle-android/app/build/outputs/apk/release/app-release.apk"
           test -f "$APK"
+
+          apksigner verify --verbose --print-certs "$APK"
 
           cp \
             "$APK" \
-            "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN ADAS V2.3.1 MENU.apk"
+            "clean-vehicle-android/app/build/outputs/apk/release/TrungKien ADAS V2.4.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TrungKien-ADAS-V2.3.1-MENU-FIX2
-          path: "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN ADAS V2.3.1 MENU.apk"
+          name: TrungKien-ADAS-Stable
+          path: "clean-vehicle-android/app/build/outputs/apk/release/TrungKien ADAS V2.4.apk"
