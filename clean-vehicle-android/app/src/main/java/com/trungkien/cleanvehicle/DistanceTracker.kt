@@ -23,12 +23,12 @@ class DistanceTracker {
 
     private val tracks = ArrayList<Track>()
     private var nextId = 1
+    var horizonNorm: Float = 0.43f
 
     fun update(detections: List<Detection>): List<DistanceDetection> {
         val vehicleDetections = detections.filter {
             YoloXTinyDetector.isVehicle(it.classId)
         }
-
         val unmatchedTracks = tracks.toMutableSet()
 
         for (d in vehicleDetections) {
@@ -37,16 +37,14 @@ class DistanceTracker {
 
             for (t in unmatchedTracks) {
                 if (!sameVehicleFamily(t.detection.classId, d.classId)) continue
-
                 val iou = t.detection.iou(d)
                 val centerDelta = centerDistance(t.detection, d)
-                val acceptable =
-                    iou >= 0.22f || (iou >= 0.08f && centerDelta <= 0.055f)
-                val matchScore = iou + (0.08f - centerDelta).coerceAtLeast(0f)
+                val acceptable = iou >= 0.22f || (iou >= 0.08f && centerDelta <= 0.055f)
+                val score = iou + (0.08f - centerDelta).coerceAtLeast(0f)
 
-                if (acceptable && matchScore > bestScore) {
+                if (acceptable && score > bestScore) {
                     best = t
-                    bestScore = matchScore
+                    bestScore = score
                 }
             }
 
@@ -75,23 +73,17 @@ class DistanceTracker {
             }
         }
 
-        for (t in unmatchedTracks) t.misses += 1
-        tracks.removeAll { it.misses > MAX_MISSES }
+        for (t in unmatchedTracks) t.misses++
+        tracks.removeAll { it.misses > 4 }
 
-        val stable = tracks
-            .filter {
-                it.hits >= MIN_STABLE_HITS &&
-                    it.misses <= 1 &&
-                    it.distanceMeters > 0f
-            }
-            .sortedBy { it.distanceMeters }
+        val stable = tracks.filter {
+            it.hits >= 3 && it.misses <= 1 && it.distanceMeters > 0f
+        }.sortedBy { it.distanceMeters }
 
-        val frontTrack = stable
-            .filter {
-                val cx = (it.detection.left + it.detection.right) * 0.5f
-                cx in 0.28f..0.72f && it.detection.bottom >= 0.42f
-            }
-            .minByOrNull { it.distanceMeters }
+        val frontTrack = stable.filter {
+            val cx = (it.detection.left + it.detection.right) * 0.5f
+            cx in 0.28f..0.72f && it.detection.bottom >= 0.42f
+        }.minByOrNull { it.distanceMeters }
 
         return stable.map { t ->
             DistanceDetection(
@@ -106,14 +98,13 @@ class DistanceTracker {
 
     private fun estimateDistance(d: Detection): Float? {
         val boxHeight = (d.bottom - d.top).coerceAtLeast(0.001f)
-        val bottom = d.bottom
-
-        val halfFov = (VERTICAL_FOV_DEG * PI / 180.0 / 2.0).toFloat()
+        val halfFov = (55f * PI / 180.0 / 2.0).toFloat()
         val fyNorm = 1f / (2f * tan(halfFov))
+        val horizon = horizonNorm.coerceIn(0.28f, 0.58f)
 
         val groundDistance =
-            if (bottom > HORIZON_NORM + 0.018f) {
-                CAMERA_HEIGHT_M * fyNorm / (bottom - HORIZON_NORM)
+            if (d.bottom > horizon + 0.018f) {
+                1.25f * fyNorm / (d.bottom - horizon)
             } else null
 
         val objectHeightM = when (d.classId) {
@@ -126,23 +117,21 @@ class DistanceTracker {
         }
 
         val sizeDistance = objectHeightM * fyNorm / boxHeight
-
         val combined = when {
-            groundDistance != null && groundDistance.isFinite() && sizeDistance.isFinite() ->
+            groundDistance != null && groundDistance.isFinite() ->
                 groundDistance * 0.68f + sizeDistance * 0.32f
-            groundDistance != null && groundDistance.isFinite() -> groundDistance
             sizeDistance.isFinite() -> sizeDistance
             else -> return null
         }
 
-        return combined.coerceIn(2.0f, 80.0f)
+        return combined.coerceIn(2f, 80f)
     }
 
     private fun sameVehicleFamily(a: Int, b: Int): Boolean {
         if (a == b) return true
-        val heavyA = a == 2 || a == 5 || a == 7
-        val heavyB = b == 2 || b == 5 || b == 7
-        return heavyA && heavyB
+        val aa = a == 2 || a == 5 || a == 7
+        val bb = b == 2 || b == 5 || b == 7
+        return aa && bb
     }
 
     private fun centerDistance(a: Detection, b: Detection): Float {
@@ -151,13 +140,5 @@ class DistanceTracker {
         val bx = (b.left + b.right) * 0.5f
         val by = (b.top + b.bottom) * 0.5f
         return abs(ax - bx) + abs(ay - by)
-    }
-
-    companion object {
-        private const val MIN_STABLE_HITS = 3
-        private const val MAX_MISSES = 4
-        private const val CAMERA_HEIGHT_M = 1.25f
-        private const val HORIZON_NORM = 0.43f
-        private const val VERTICAL_FOV_DEG = 55f
     }
 }

@@ -36,6 +36,23 @@ class TtcWarningBeeper : Closeable {
         }
     }
 
+    fun leadMovedDoubleBeep() {
+        // Distinct from TTC: two sharp beeps, one-shot.
+        handler.post {
+            tone82.startTone(
+                ToneGenerator.TONE_PROP_BEEP2,
+                120,
+            )
+        }
+
+        handler.postDelayed({
+            tone100.startTone(
+                ToneGenerator.TONE_PROP_BEEP2,
+                150,
+            )
+        }, 230L)
+    }
+
     private val beepRunnable = object : Runnable {
         override fun run() {
             val level = currentLevel
@@ -55,8 +72,8 @@ class TtcWarningBeeper : Closeable {
             val durationMs = when (level) {
                 1 -> 65
                 2 -> 75
-                3 -> 85
-                else -> 100
+                3 -> 90
+                else -> 110
             }
 
             val intervalMs = when (level) {
@@ -67,7 +84,8 @@ class TtcWarningBeeper : Closeable {
             }
 
             tone.startTone(
-                ToneGenerator.TONE_PROP_BEEP,
+                if (level >= 4) ToneGenerator.TONE_PROP_BEEP2
+                else ToneGenerator.TONE_PROP_BEEP,
                 durationMs,
             )
 

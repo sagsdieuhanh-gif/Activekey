@@ -34,9 +34,9 @@ class DetectionOverlay(context: Context) : View(context) {
         color = Color.WHITE
     }
 
-    private val riskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val bannerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        textSize = 52f
+        textSize = 46f
         color = Color.WHITE
     }
 
@@ -45,9 +45,15 @@ class DetectionOverlay(context: Context) : View(context) {
         color = Color.argb(195, 0, 0, 0)
     }
 
-    private val riskBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val bannerBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.argb(215, 170, 25, 15)
+        color = Color.argb(220, 0, 135, 90)
+    }
+
+    private val hoodPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        color = Color.argb(210, 255, 120, 40)
     }
 
     private val egoLanePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -73,21 +79,31 @@ class DetectionOverlay(context: Context) : View(context) {
     private var ttcState = TtcState.empty()
 
     @Volatile
-    private var roadSourceWidth: Int = 4
-
-    @Volatile
-    private var roadSourceHeight: Int = 3
-
-    @Volatile
     private var laneResult: LaneResult? = null
+
+    @Volatile
+    private var calibration = CameraCalibrationState()
+
+    @Volatile
+    private var leadMovedUntilMs = 0L
+
+    @Volatile
+    private var roadSourceWidth = 4
+
+    @Volatile
+    private var roadSourceHeight = 3
 
     fun updateRoad(
         result: DetectorResult,
         stable: List<DistanceDetection>,
         ttc: TtcState,
+        calibrationState: CameraCalibrationState,
+        leadMoveState: LeadMoveState,
     ) {
         distanceDetections = stable
         ttcState = ttc
+        calibration = calibrationState
+        leadMovedUntilMs = leadMoveState.messageUntilMs
         roadSourceWidth = result.sourceWidth
         roadSourceHeight = result.sourceHeight
         invalidate()
@@ -98,43 +114,60 @@ class DetectionOverlay(context: Context) : View(context) {
         invalidate()
     }
 
-    fun clear() {
-        distanceDetections = emptyList()
-        laneResult = null
-        ttcState = TtcState.empty()
-        invalidate()
-    }
-
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        drawHoodMask(canvas)
         drawLanes(canvas)
         drawRoadUsers(canvas)
+        drawLeadMoveBanner(canvas)
         drawTtcBanner(canvas)
     }
 
-    private fun drawTtcBanner(canvas: Canvas) {
-        val state = ttcState
-        val ttc = state.ttcSeconds ?: return
-        if (state.riskLevel <= 0) return
+    private fun drawHoodMask(canvas: Canvas) {
+        val y = height * calibration.hoodTopNorm
+        canvas.drawLine(0f, y, width.toFloat(), y, hoodPaint)
+    }
 
-        val text = "TTC ≈ " + String.format(Locale.US, "%.1f s", ttc)
-        val w = riskPaint.measureText(text) + 40f
+    private fun drawLeadMoveBanner(canvas: Canvas) {
+        if (android.os.SystemClock.elapsedRealtime() >= leadMovedUntilMs) return
+
+        val text = "XE PHÍA TRƯỚC ĐÃ DI CHUYỂN"
+        val w = bannerPaint.measureText(text) + 46f
         val left = (width - w) * 0.5f
-        val top = height - 105f
+        val top = 34f
 
         canvas.drawRoundRect(
-            RectF(left, top, left + w, top + 84f),
+            RectF(left, top, left + w, top + 76f),
             18f,
             18f,
-            riskBgPaint,
+            bannerBgPaint,
         )
 
-        canvas.drawText(text, left + 20f, top + 61f, riskPaint)
+        canvas.drawText(text, left + 23f, top + 55f, bannerPaint)
+    }
+
+    private fun drawTtcBanner(canvas: Canvas) {
+        val ttc = ttcState.ttcSeconds ?: return
+        if (ttcState.riskLevel <= 0) return
+
+        val text = "TTC ≈ " + String.format(Locale.US, "%.1f s", ttc)
+        val w = bannerPaint.measureText(text) + 40f
+        val left = (width - w) * 0.5f
+        val top = height - 102f
+
+        canvas.drawRoundRect(
+            RectF(left, top, left + w, top + 78f),
+            18f,
+            18f,
+            textBgPaint,
+        )
+
+        canvas.drawText(text, left + 20f, top + 57f, bannerPaint)
     }
 
     private fun drawLanes(canvas: Canvas) {
         val result = laneResult ?: return
-        val transform = transformFor(result.sourceWidth, result.sourceHeight)
+        val tr = transformFor(result.sourceWidth, result.sourceHeight)
 
         for (laneIndex in result.lanes.indices) {
             val points = result.lanes[laneIndex]
@@ -143,14 +176,9 @@ class DetectionOverlay(context: Context) : View(context) {
             val path = Path()
             var started = false
 
-            for (point in points) {
-                val x =
-                    transform.offsetX +
-                        point.x * result.sourceWidth * transform.scale
-
-                val y =
-                    transform.offsetY +
-                        point.y * result.sourceHeight * transform.scale
+            for (p in points) {
+                val x = tr.offsetX + p.x * result.sourceWidth * tr.scale
+                val y = tr.offsetY + p.y * result.sourceHeight * tr.scale
 
                 if (!started) {
                     path.moveTo(x, y)
@@ -171,19 +199,14 @@ class DetectionOverlay(context: Context) : View(context) {
     private fun drawRoadUsers(canvas: Canvas) {
         val sw = roadSourceWidth.toFloat().coerceAtLeast(1f)
         val sh = roadSourceHeight.toFloat().coerceAtLeast(1f)
-        val transform = transformFor(roadSourceWidth, roadSourceHeight)
+        val tr = transformFor(roadSourceWidth, roadSourceHeight)
 
         for (item in distanceDetections) {
             val d = item.detection
-
-            val left =
-                transform.offsetX + d.left * sw * transform.scale
-            val top =
-                transform.offsetY + d.top * sh * transform.scale
-            val right =
-                transform.offsetX + d.right * sw * transform.scale
-            val bottom =
-                transform.offsetY + d.bottom * sh * transform.scale
+            val left = tr.offsetX + d.left * sw * tr.scale
+            val top = tr.offsetY + d.top * sh * tr.scale
+            val right = tr.offsetX + d.right * sw * tr.scale
+            val bottom = tr.offsetY + d.bottom * sh * tr.scale
 
             canvas.drawRect(
                 RectF(left, top, right, bottom),
@@ -194,32 +217,26 @@ class DetectionOverlay(context: Context) : View(context) {
                 if (item.isFrontVehicle) "XE PHÍA TRƯỚC"
                 else YoloXTinyDetector.label(d.classId)
 
-            val confidence = "${(d.score * 100f).toInt()}%"
-            val line1 = "$label $confidence"
-
-            val state = ttcState
+            val line1 = "$label ${(d.score * 100f).toInt()}%"
             val line2 =
-                if (item.isFrontVehicle && state.ttcSeconds != null) {
-                    "≈ " +
-                        String.format(Locale.US, "%.1f m", item.distanceMeters) +
+                "≈ " +
+                    String.format(Locale.US, "%.1f m", item.distanceMeters) +
+                    if (item.isFrontVehicle && ttcState.ttcSeconds != null) {
                         " • TTC " +
-                        String.format(Locale.US, "%.1f s", state.ttcSeconds)
-                } else {
-                    "≈ " + String.format(Locale.US, "%.1f m", item.distanceMeters)
-                }
+                            String.format(Locale.US, "%.1f s", ttcState.ttcSeconds)
+                    } else ""
 
-            val boxWidth =
-                maxOf(
-                    textPaint.measureText(line1),
-                    distancePaint.measureText(line2),
-                ) + 18f
+            val bw = maxOf(
+                textPaint.measureText(line1),
+                distancePaint.measureText(line2),
+            ) + 18f
 
             val labelTop = (top - 79f).coerceAtLeast(0f)
 
             canvas.drawRect(
                 left,
                 labelTop,
-                left + boxWidth,
+                left + bw,
                 labelTop + 77f,
                 textBgPaint,
             )
@@ -235,20 +252,14 @@ class DetectionOverlay(context: Context) : View(context) {
         val offsetY: Float,
     )
 
-    private fun transformFor(
-        sourceWidth: Int,
-        sourceHeight: Int,
-    ): ScreenTransform {
+    private fun transformFor(sourceWidth: Int, sourceHeight: Int): ScreenTransform {
         val sw = sourceWidth.toFloat().coerceAtLeast(1f)
         val sh = sourceHeight.toFloat().coerceAtLeast(1f)
         val scale = maxOf(width / sw, height / sh)
-        val renderedWidth = sw * scale
-        val renderedHeight = sh * scale
-
         return ScreenTransform(
-            scale = scale,
-            offsetX = (width - renderedWidth) * 0.5f,
-            offsetY = (height - renderedHeight) * 0.5f,
+            scale,
+            (width - sw * scale) * 0.5f,
+            (height - sh * scale) * 0.5f,
         )
     }
 }

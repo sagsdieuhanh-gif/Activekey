@@ -8,11 +8,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.trungkien.cleanvehicle.v13ttc"
+        applicationId = "com.trungkien.cleanvehicle.v14auto"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1300
-        versionName = "1.3.0"
+        versionCode = 1400
+        versionName = "1.4.0"
 
         ndk {
             abiFilters += "arm64-v8a"
@@ -20,12 +20,8 @@ android {
     }
 
     buildTypes {
-        release {
-            isMinifyEnabled = false
-        }
-        debug {
-            isMinifyEnabled = false
-        }
+        debug { isMinifyEnabled = false }
+        release { isMinifyEnabled = false }
     }
 
     compileOptions {
@@ -40,9 +36,7 @@ android {
     }
 }
 
-kotlin {
-    jvmToolchain(17)
-}
+kotlin { jvmToolchain(17) }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.18.0")

@@ -4,14 +4,12 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <uses-feature
-        android:name="android.hardware.camera"
-        android:required="true" />
+    <uses-feature android:name="android.hardware.camera" android:required="true" />
 
     <application
         android:allowBackup="false"
-        android:icon="@drawable/ic_launcher_v13"
-        android:label="TRUNGKIEN V1.3 TTC"
+        android:icon="@drawable/ic_launcher_v14"
+        android:label="TRUNGKIEN V1.4 AUTO"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 

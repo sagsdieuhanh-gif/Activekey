@@ -42,48 +42,22 @@ class MainActivity : ComponentActivity() {
     private val distanceTracker = DistanceTracker()
     private val ttcEstimator = TtcEstimator()
     private val beeper = TtcWarningBeeper()
+    private val autoCal = CameraAutoCalibrator()
+    private val leadMove = LeadVehicleMoveDetector()
 
     private lateinit var speedProvider: SpeedProvider
 
-    @Volatile
-    private var detector: YoloXTinyDetector? = null
-
-    @Volatile
-    private var laneDetector: UfldLaneDetector? = null
-
-    @Volatile
-    private var cameraRunning = false
-
-    @Volatile
-    private var lastInferenceCompleteMs = 0L
-
-    @Volatile
-    private var lastInferenceMs = 0f
-
-    @Volatile
-    private var lastStableVehicleCount = 0
-
-    @Volatile
-    private var inferenceCounter = 0L
-
-    @Volatile
-    private var currentTtc = TtcState.empty()
-
-    @Volatile
-    private var lastLaneCompleteMs = 0L
-
-    @Volatile
-    private var lastLaneInferenceMs = 0f
-
-    @Volatile
-    private var laneInferenceCounter = 0L
-
-    @Volatile
-    private var leftLaneConfidence = 0f
-
-    @Volatile
-    private var rightLaneConfidence = 0f
-
+    @Volatile private var detector: YoloXTinyDetector? = null
+    @Volatile private var laneDetector: UfldLaneDetector? = null
+    @Volatile private var cameraRunning = false
+    @Volatile private var currentTtc = TtcState.empty()
+    @Volatile private var lastInferenceMs = 0f
+    @Volatile private var lastLaneInferenceMs = 0f
+    @Volatile private var lastStableVehicleCount = 0
+    @Volatile private var leftLaneConfidence = 0f
+    @Volatile private var rightLaneConfidence = 0f
+    @Volatile private var roadCounter = 0L
+    @Volatile private var laneCounter = 0L
     private var analysisCounter = 0L
 
     private val permissionLauncher =
@@ -108,12 +82,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         speedProvider = SpeedProvider(this)
 
-        window.addFlags(
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-        )
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility =
@@ -133,25 +104,18 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.CAMERA,
             ) == PackageManager.PERMISSION_GRANTED
 
-        val fineGranted =
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION,
-            ) == PackageManager.PERMISSION_GRANTED
-
-        if (cameraGranted && fineGranted) {
+        if (cameraGranted) {
             speedProvider.start()
             loadModels()
-            return
-        }
-
-        permissionLauncher.launch(
-            arrayOf(
-                Manifest.permission.CAMERA,
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
+        } else {
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.CAMERA,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                )
             )
-        )
+        }
     }
 
     private fun buildUi() {
@@ -160,10 +124,8 @@ class MainActivity : ComponentActivity() {
         }
 
         previewView = PreviewView(this).apply {
-            implementationMode =
-                PreviewView.ImplementationMode.PERFORMANCE
-            scaleType =
-                PreviewView.ScaleType.FILL_CENTER
+            implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+            scaleType = PreviewView.ScaleType.FILL_CENTER
         }
 
         overlay = DetectionOverlay(this)
@@ -173,25 +135,11 @@ class MainActivity : ComponentActivity() {
             setBackgroundColor(Color.argb(175, 0, 0, 0))
             textSize = 13f
             setPadding(18, 12, 18, 12)
-            text = "TRUNGKIEN CLEAN V1.3 TTC\nĐANG NẠP..."
+            text = "TRUNGKIEN CLEAN V1.4 AUTO\nĐANG NẠP..."
         }
 
-        root.addView(
-            previewView,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT,
-            )
-        )
-
-        root.addView(
-            overlay,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT,
-            )
-        )
-
+        root.addView(previewView, FrameLayout.LayoutParams(-1, -1))
+        root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         root.addView(
             status,
             FrameLayout.LayoutParams(
@@ -205,42 +153,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun loadModels() {
-        status.text =
-            "TRUNGKIEN CLEAN V1.3 TTC\nĐANG NẠP YOLOX-TINY..."
-
         modelExecutor.execute {
             runCatching {
-                val roadFile =
-                    copyAsset(
-                        "yolox_tiny.onnx",
-                        "yolox_tiny_clean_v13.onnx",
-                        5_000_000L,
-                    )
-
-                val road = YoloXTinyDetector(roadFile)
-
-                runOnUiThread {
-                    status.text =
-                        "TRUNGKIEN CLEAN V1.3 TTC\nYOLOX OK • ĐANG NẠP UFLD..."
-                }
+                val roadFile = copyAsset(
+                    "yolox_tiny.onnx",
+                    "yolox_tiny_clean_v14.onnx",
+                    5_000_000L,
+                )
 
                 val laneFile = copyLaneAsset()
-                val lane = UfldLaneDetector(laneFile)
 
-                road to lane
+                YoloXTinyDetector(roadFile) to
+                    UfldLaneDetector(laneFile)
             }.onSuccess { models ->
                 detector = models.first
                 laneDetector = models.second
-
+                runOnUiThread { startCamera() }
+            }.onFailure { e ->
                 runOnUiThread {
-                    status.text =
-                        "TRUNGKIEN CLEAN V1.3 TTC\nSẴN SÀNG"
-                    startCamera()
-                }
-            }.onFailure { error ->
-                runOnUiThread {
-                    status.text =
-                        "LỖI MODEL\n${error.javaClass.simpleName}: ${error.message}"
+                    status.text = "LỖI MODEL\n${e.message}"
                 }
             }
         }
@@ -259,19 +190,14 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        require(target.length() > minimumSize) {
-            "$assetName quá nhỏ: ${target.length()} bytes"
-        }
-
+        require(target.length() > minimumSize)
         return target
     }
 
     private fun copyLaneAsset(): File {
-        val target = File(filesDir, "ufld_culane_clean_v13.onnx")
+        val target = File(filesDir, "ufld_culane_clean_v14.onnx")
 
-        if (target.exists() && target.length() == UFLD_FILE_SIZE) {
-            return target
-        }
+        if (target.exists() && target.length() == UFLD_FILE_SIZE) return target
 
         assets.open("ufld_culane.onnx").use { input ->
             target.outputStream().use { output ->
@@ -279,69 +205,54 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        require(target.length() == UFLD_FILE_SIZE) {
-            "UFLD sai kích thước: ${target.length()}"
-        }
-
+        require(target.length() == UFLD_FILE_SIZE)
         return target
     }
 
     private fun startCamera() {
-        val providerFuture = ProcessCameraProvider.getInstance(this)
+        val future = ProcessCameraProvider.getInstance(this)
 
-        providerFuture.addListener({
-            runCatching {
-                val provider = providerFuture.get()
+        future.addListener({
+            val provider = future.get()
 
-                val preview =
-                    Preview.Builder()
-                        .setTargetAspectRatio(AspectRatio.RATIO_4_3)
-                        .build()
-                        .also {
-                            it.surfaceProvider = previewView.surfaceProvider
-                        }
+            val preview = Preview.Builder()
+                .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+                .build()
+                .also { it.surfaceProvider = previewView.surfaceProvider }
 
-                val resolutionSelector =
-                    ResolutionSelector.Builder()
-                        .setAspectRatioStrategy(
-                            AspectRatioStrategy(
-                                AspectRatio.RATIO_4_3,
-                                AspectRatioStrategy.FALLBACK_RULE_AUTO,
-                            )
+            val selector =
+                ResolutionSelector.Builder()
+                    .setAspectRatioStrategy(
+                        AspectRatioStrategy(
+                            AspectRatio.RATIO_4_3,
+                            AspectRatioStrategy.FALLBACK_RULE_AUTO,
                         )
-                        .setResolutionStrategy(
-                            ResolutionStrategy(
-                                android.util.Size(640, 480),
-                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
-                            )
+                    )
+                    .setResolutionStrategy(
+                        ResolutionStrategy(
+                            android.util.Size(640, 480),
+                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
                         )
-                        .build()
+                    )
+                    .build()
 
-                val analysis =
-                    ImageAnalysis.Builder()
-                        .setResolutionSelector(resolutionSelector)
-                        .setOutputImageFormat(
-                            ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888
-                        )
-                        .setBackpressureStrategy(
-                            ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST
-                        )
-                        .build()
+            val analysis = ImageAnalysis.Builder()
+                .setResolutionSelector(selector)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
 
-                analysis.setAnalyzer(analyzerExecutor, ::analyze)
+            analysis.setAnalyzer(analyzerExecutor, ::analyze)
 
-                provider.unbindAll()
-                provider.bindToLifecycle(
-                    this,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
-                    preview,
-                    analysis,
-                )
+            provider.unbindAll()
+            provider.bindToLifecycle(
+                this,
+                CameraSelector.DEFAULT_BACK_CAMERA,
+                preview,
+                analysis,
+            )
 
-                cameraRunning = true
-            }.onFailure { error ->
-                status.text = "LỖI CAMERA\n${error.message}"
-            }
+            cameraRunning = true
         }, ContextCompat.getMainExecutor(this))
     }
 
@@ -356,30 +267,49 @@ class MainActivity : ComponentActivity() {
 
         try {
             val roadResult = road.detect(image)
-
-            lastInferenceCompleteMs = SystemClock.elapsedRealtime()
             lastInferenceMs = roadResult.inferenceMs
-            inferenceCounter++
+            roadCounter++
 
-            val stable = distanceTracker.update(roadResult.detections)
+            val filtered = autoCal.filterHood(roadResult.detections)
+
+            distanceTracker.horizonNorm =
+                autoCal.state.horizonNorm
+
+            val stable =
+                distanceTracker.update(filtered)
+
             lastStableVehicleCount = stable.size
 
-            val front = stable.firstOrNull { it.isFrontVehicle }
+            val front =
+                stable.firstOrNull { it.isFrontVehicle }
 
             currentTtc =
                 ttcEstimator.update(
-                    front = front,
-                    egoSpeedKph = speedProvider.speedKph,
-                    nowMs = SystemClock.elapsedRealtime(),
+                    front,
+                    speedProvider.speedKph,
+                    SystemClock.elapsedRealtime(),
                 )
 
             beeper.update(currentTtc.riskLevel)
+
+            val moved =
+                leadMove.update(
+                    front,
+                    speedProvider.speedKph,
+                    SystemClock.elapsedRealtime(),
+                )
+
+            if (moved) {
+                beeper.leadMovedDoubleBeep()
+            }
 
             runOnUiThread {
                 overlay.updateRoad(
                     roadResult,
                     stable,
                     currentTtc,
+                    autoCal.state,
+                    leadMove.state,
                 )
             }
 
@@ -388,22 +318,28 @@ class MainActivity : ComponentActivity() {
             if (analysisCounter % 2L == 0L) {
                 val laneResult = lane.detect(image)
 
-                lastLaneCompleteMs = SystemClock.elapsedRealtime()
-                lastLaneInferenceMs = laneResult.inferenceMs
-                laneInferenceCounter++
-                leftLaneConfidence = laneResult.confidence[1]
-                rightLaneConfidence = laneResult.confidence[2]
+                lastLaneInferenceMs =
+                    laneResult.inferenceMs
+
+                laneCounter++
+
+                leftLaneConfidence =
+                    laneResult.confidence[1]
+
+                rightLaneConfidence =
+                    laneResult.confidence[2]
+
+                autoCal.observeLane(laneResult)
 
                 runOnUiThread {
                     overlay.updateLane(laneResult)
                 }
             }
-        } catch (error: Throwable) {
+        } catch (e: Throwable) {
             beeper.update(0)
 
             runOnUiThread {
-                status.text =
-                    "AI ERROR\n${error.javaClass.simpleName}: ${error.message}"
+                status.text = "AI ERROR\n${e.javaClass.simpleName}: ${e.message}"
             }
         } finally {
             image.close()
@@ -412,128 +348,75 @@ class MainActivity : ComponentActivity() {
 
     private val heartbeat = object : Runnable {
         override fun run() {
-            val road = detector
-            val lane = laneDetector
-            val now = SystemClock.elapsedRealtime()
+            val cal = autoCal.state
+            val gps = speedProvider.speedKph
+            val ttc = currentTtc
 
-            if (road != null && lane != null) {
-                val roadAge =
-                    if (lastInferenceCompleteMs == 0L) Long.MAX_VALUE
-                    else now - lastInferenceCompleteMs
+            status.text =
+                buildString {
+                    append("TRUNGKIEN CLEAN V1.4 AUTO\n")
 
-                val laneAge =
-                    if (lastLaneCompleteMs == 0L) Long.MAX_VALUE
-                    else now - lastLaneCompleteMs
+                    append("GPS ")
+                    append(gps?.roundToInt() ?: -1)
+                    append(" km/h • XE ")
+                    append(lastStableVehicleCount)
+                    append(" • ROAD ")
+                    append(lastInferenceMs.roundToInt())
+                    append(" ms #")
+                    append(roadCounter)
 
-                val roadState = when {
-                    !cameraRunning -> "CAMERA..."
-                    lastInferenceCompleteMs == 0L -> "ROAD..."
-                    roadAge > 3_000L -> "⚠ ROAD STALL"
-                    else -> "ROAD LIVE"
-                }
+                    append("\nAUTO ")
+                    append(if (cal.locked) "LOCK" else "LEARN")
+                    append(" • H ")
+                    append(String.format(Locale.US, "%.2f", cal.horizonNorm))
+                    append(" • ROLL ")
+                    append(String.format(Locale.US, "%.1f°", cal.rollDeg))
+                    append(" • HOOD ")
+                    append(String.format(Locale.US, "%.2f", cal.hoodTopNorm))
 
-                val laneState = when {
-                    lastLaneCompleteMs == 0L -> "LANE..."
-                    laneAge > 4_000L -> "⚠ LANE STALL"
-                    else -> "LANE LIVE"
-                }
+                    append("\nLANE L ")
+                    append((leftLaneConfidence * 100f).roundToInt())
+                    append("% R ")
+                    append((rightLaneConfidence * 100f).roundToInt())
+                    append("% • ")
+                    append(lastLaneInferenceMs.roundToInt())
+                    append(" ms #")
+                    append(laneCounter)
 
-                val state = currentTtc
-                val gps = state.egoSpeedKph
-
-                status.text =
-                    buildString {
-                        append("TRUNGKIEN CLEAN V1.3 TTC\n")
-                        append("YOLOX/")
-                        append(road.runtimeName)
-                        append(" • ")
-                        append(roadState)
-
-                        append("\nXE ỔN ĐỊNH ")
-                        append(lastStableVehicleCount)
-                        append(" • ")
-                        append(lastInferenceMs.roundToInt())
-                        append(" ms • #")
-                        append(inferenceCounter)
-
-                        append("\nGPS ")
-                        if (gps != null) {
-                            append(gps.roundToInt())
-                            append(" km/h")
-                        } else {
-                            append("-- km/h")
-                        }
-
-                        if (state.distanceMeters > 0f) {
-                            append(" • FRONT ≈ ")
-                            append(
-                                String.format(
-                                    Locale.US,
-                                    "%.1f m",
-                                    state.distanceMeters,
-                                )
-                            )
-                        }
-
-                        if (state.closingSpeedMps > 0.05f) {
-                            append(" • CLOSING ")
-                            append(
-                                String.format(
-                                    Locale.US,
-                                    "%.1f m/s",
-                                    state.closingSpeedMps,
-                                )
-                            )
-                        }
-
-                        if (state.ttcSeconds != null) {
-                            append("\nTTC ≈ ")
-                            append(
-                                String.format(
-                                    Locale.US,
-                                    "%.1f s",
-                                    state.ttcSeconds,
-                                )
-                            )
-                            append(" • BEEP ")
-                            append(state.riskLevel)
-                        }
-
-                        append("\nUFLD/")
-                        append(lane.runtimeName)
-                        append(" • ")
-                        append(laneState)
-                        append(" • L ")
-                        append((leftLaneConfidence * 100f).roundToInt())
-                        append("% R ")
-                        append((rightLaneConfidence * 100f).roundToInt())
-                        append("% • ")
-                        append(lastLaneInferenceMs.roundToInt())
-                        append(" ms • #")
-                        append(laneInferenceCounter)
+                    if (ttc.distanceMeters > 0f) {
+                        append("\nFRONT ≈ ")
+                        append(String.format(Locale.US, "%.1f m", ttc.distanceMeters))
                     }
-            }
 
-            mainHandler.postDelayed(this, 1_000L)
+                    if (ttc.ttcSeconds != null) {
+                        append(" • TTC ≈ ")
+                        append(String.format(Locale.US, "%.1f s", ttc.ttcSeconds))
+                        append(" • BEEP ")
+                        append(ttc.riskLevel)
+                    }
+
+                    if (leadMove.state.armed && !leadMove.state.moved) {
+                        append("\nĐÈN ĐỎ: ĐANG THEO DÕI XE PHÍA TRƯỚC")
+                    }
+
+                    if (leadMove.state.moved) {
+                        append("\nXE PHÍA TRƯỚC ĐÃ DI CHUYỂN")
+                    }
+                }
+
+            mainHandler.postDelayed(this, 1000L)
         }
     }
 
     override fun onDestroy() {
         mainHandler.removeCallbacks(heartbeat)
-
         beeper.update(0)
         beeper.close()
         speedProvider.stop()
-
         detector?.close()
-        detector = null
-
         laneDetector?.close()
-        laneDetector = null
-
         analyzerExecutor.shutdownNow()
         modelExecutor.shutdownNow()
-
         super.onDestroy()
     }
 

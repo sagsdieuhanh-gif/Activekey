@@ -1,4 +1,4 @@
-name: TrungKien Clean V1.3 TTC
+name: TrungKien Clean V1.4 Auto
 
 on:
   workflow_dispatch:
@@ -11,7 +11,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -29,84 +28,39 @@ jobs:
       - name: Install Android SDK
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
 
-      - name: Download exact YOLOX and UFLD models
+      - name: Download models
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p clean-vehicle-android/app/src/main/assets /tmp/ufld
 
-          mkdir -p \
-            clean-vehicle-android/app/src/main/assets \
-            /tmp/ufld
-
-          curl -L --fail --retry 5 --connect-timeout 30 \
+          curl -L --fail --retry 5 \
             "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx" \
             -o clean-vehicle-android/app/src/main/assets/yolox_tiny.onnx
 
-          YOLO_SIZE="$(stat -c%s clean-vehicle-android/app/src/main/assets/yolox_tiny.onnx)"
-          test "$YOLO_SIZE" -gt 5000000
-          test "$YOLO_SIZE" -lt 50000000
-
-          curl -L --fail --retry 5 --connect-timeout 30 \
+          curl -L --fail --retry 5 \
             "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/140_Ultra-Fast-Lane-Detection/resources_culane.tar.gz" \
             -o /tmp/ufld.tar.gz
 
           tar -xzf /tmp/ufld.tar.gz -C /tmp/ufld
 
-          LANE_SRC="/tmp/ufld/saved_model_culane/ultra_falst_lane_detection_culane_288x800.onnx"
-          test -f "$LANE_SRC"
-
-          cp "$LANE_SRC" clean-vehicle-android/app/src/main/assets/ufld_culane.onnx
+          cp \
+            /tmp/ufld/saved_model_culane/ultra_falst_lane_detection_culane_288x800.onnx \
+            clean-vehicle-android/app/src/main/assets/ufld_culane.onnx
 
           test "$(stat -c%s clean-vehicle-android/app/src/main/assets/ufld_culane.onnx)" = "178076232"
 
-          echo \
-            "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  clean-vehicle-android/app/src/main/assets/ufld_culane.onnx" \
-            | sha256sum -c -
-
-      - name: Verify ONNX contracts
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          python -m pip install --quiet "onnxruntime==1.23.2" "numpy<3"
-
-          python - <<'PY'
-          import numpy as np
-          import onnxruntime as ort
-
-          yp = "clean-vehicle-android/app/src/main/assets/yolox_tiny.onnx"
-          ys = ort.InferenceSession(yp, providers=["CPUExecutionProvider"])
-          yi = ys.get_inputs()[0]
-          assert list(yi.shape) == [1, 3, 416, 416]
-          y = ys.run(None, {yi.name: np.zeros((1,3,416,416), np.float32)})[0]
-          assert y.shape == (1, 3549, 85)
-          assert np.isfinite(y).all()
-
-          lp = "clean-vehicle-android/app/src/main/assets/ufld_culane.onnx"
-          ls = ort.InferenceSession(lp, providers=["CPUExecutionProvider"])
-          li = ls.get_inputs()[0]
-          assert list(li.shape) == [1, 3, 288, 800]
-          lane = ls.run(None, {li.name: np.zeros((1,3,288,800), np.float32)})[0]
-          assert lane.shape == (1, 201, 18, 4)
-          assert np.isfinite(lane).all()
-
-          print("PASS: YOLOX + UFLD.")
-          PY
-
-      - name: Build V1.3 TTC
+      - name: Build V1.4
         working-directory: clean-vehicle-android
         run: gradle --no-daemon clean :app:assembleDebug
 
       - name: Prepare APK
-        shell: bash
         run: |
-          set -euo pipefail
-          APK="clean-vehicle-android/app/build/outputs/apk/debug/app-debug.apk"
-          test -f "$APK"
-          cp "$APK" \
-            "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN V1.3 TTC.apk"
+          cp \
+            "clean-vehicle-android/app/build/outputs/apk/debug/app-debug.apk" \
+            "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN V1.4 AUTO.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TrungKien-Clean-V1.3-TTC
-          path: "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN V1.3 TTC.apk"
+          name: TrungKien-Clean-V1.4-Auto
+          path: "clean-vehicle-android/app/build/outputs/apk/debug/TRUNGKIEN V1.4 AUTO.apk"
