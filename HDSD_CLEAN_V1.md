@@ -48,3 +48,9 @@ Chạy ít nhất 10–15 phút. Nếu CLEAN V1 vẫn nhận đều thì lỗi c
 - Bật `android.useAndroidX=true` trong project CLEAN độc lập.
 - Sửa import `AspectRatioStrategy`, `ResolutionSelector`, `ResolutionStrategy` sang package `androidx.camera.core.resolutionselector`.
 - Không thay đổi model, preprocess, decoder, threshold hay pipeline nhận diện.
+
+## Launch fix V1.0.2
+- Thêm Kotlin Android Gradle plugin để các file `.kt` thực sự được compile vào APK.
+- Dùng Kotlin Gradle Plugin 2.3.21 với JVM toolchain 17.
+- Tăng version lên 1.0.2.
+- Không thay đổi YOLOX-Tiny, preprocess, decoder, threshold, CameraX pipeline hay XNNPACK.
