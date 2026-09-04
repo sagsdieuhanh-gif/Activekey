@@ -44,15 +44,15 @@ class SpcVideoOverlay(context:Context):View(context){
     override fun onDraw(c:Canvas){super.onDraw(c);result?.let{drawRoad(c,it)};drawHud(c);if(technical){drawDebug(c);drawHorizon(c)};drawWarnings(c);drawThermal(c)}
 
     private fun drawRoad(c:Canvas,r:SupercomboResult){
-        val l=r.laneLines.getOrNull(1).orEmpty().mapNotNull{project(it,r)}; val rr=r.laneLines.getOrNull(2).orEmpty().mapNotNull{project(it,r)}
+        val l=r.laneLines.getOrNull(1).orEmpty().map{it.copy(lateralMeters=SupercomboLaneSanity.sanitizedLateral(r,it,true))}.mapNotNull{project(it,r)}; val rr=r.laneLines.getOrNull(2).orEmpty().map{it.copy(lateralMeters=SupercomboLaneSanity.sanitizedLateral(r,it,false))}.mapNotNull{project(it,r)}
         if(l.size>=4&&rr.size>=4&&r.laneProbabilities.getOrElse(1){0f}>=0.20f&&r.laneProbabilities.getOrElse(2){0f}>=0.20f){
             val n=minOf(l.size,rr.size); val p=Path();p.moveTo(l[0].first,l[0].second);for(i in 1 until n)p.lineTo(l[i].first,l[i].second);for(i in n-1 downTo 0)p.lineTo(rr[i].first,rr[i].second);p.close();c.drawPath(p,corridor)
             poly(c,l,if(snapshot.warnings.ldwWarning&&snapshot.warnings.ldwDirection<0)danger else lane);poly(c,rr,if(snapshot.warnings.ldwWarning&&snapshot.warnings.ldwDirection>0)danger else lane)
         }
         drawPathFill(c,r)
         if(technical)for(e in r.roadEdges)poly(c,e.mapNotNull{project(it,r)},edge)
-        val h=r.leadHint?.takeIf{it.probability>=0.12f&&it.distanceMeters in 2f..200f}?:return;if(snapshot.lead==null&&h.probability<0.28f)return
-        val far=(h.distanceMeters+1.6f).coerceAtMost(190f);val near=(h.distanceMeters-0.8f).coerceAtLeast(1.6f);val hw=1.15f
+        val verified=snapshot.lead?:return;val h=r.leadHint?.takeIf{it.distanceMeters in 2f..200f}?:return;if(snapshot.debugText.startsWith("DROP_"))return
+        val vd=verified.distanceMeters;val far=(vd+1.6f).coerceAtMost(190f);val near=(vd-0.8f).coerceAtLeast(1.6f);val hw=1.15f
         val a=project(SupercomboPoint(far,h.lateralMeters+hw),r)?:return;val b=project(SupercomboPoint(far,h.lateralMeters-hw),r)?:return;val cc=project(SupercomboPoint(near,h.lateralMeters-hw),r)?:return;val e=project(SupercomboPoint(near,h.lateralMeters+hw),r)?:return
         val p=Path();p.moveTo(a.first,a.second);p.lineTo(b.first,b.second);p.lineTo(cc.first,cc.second);p.lineTo(e.first,e.second);p.close();c.drawPath(p,lead);drawLeadReticle(c,r,h)
     }
@@ -80,7 +80,8 @@ class SpcVideoOverlay(context:Context):View(context){
         "pair $pairMs ms | feat ${virtual.featureSamples}/${virtual.featureRequired}",
         "pitch ${String.format(Locale.US,"%.2f",virtual.pitchDeg)}° yaw ${String.format(Locale.US,"%.2f",virtual.yawDeg)}° CALIBRATED ${(virtual.calibrationQuality*100).toInt()}%",
         "fPx ${virtual.focalPx.toInt()} (r ${String.format(Locale.US,"%.3f",virtual.fxRatio)}) | horizon ${(virtual.horizonNorm*virtual.sourceHeight).toInt()} | big virtual",
-        "lane ${String.format(Locale.US,"%.2f",p.getOrElse(0){0f})} ${String.format(Locale.US,"%.2f",p.getOrElse(1){0f})} ${String.format(Locale.US,"%.2f",p.getOrElse(2){0f})} ${String.format(Locale.US,"%.2f",p.getOrElse(3){0f})} | conf ${String.format(Locale.US,"%.2f",conf)}")
+        "lane ${String.format(Locale.US,"%.2f",p.getOrElse(0){0f})} ${String.format(Locale.US,"%.2f",p.getOrElse(1){0f})} ${String.format(Locale.US,"%.2f",p.getOrElse(2){0f})} ${String.format(Locale.US,"%.2f",p.getOrElse(3){0f})} | conf ${String.format(Locale.US,"%.2f",conf)}",
+        "lead raw ${r?.leadHint?.distanceMeters?.let{String.format(Locale.US,"%.1fm",it)}?:"--"} p=${r?.leadHint?.probability?.let{"${(it*100).toInt()}%"}?:"--"} | ${snapshot.debugText}")
         var mw=0f;for(s in lines)mw=max(mw,dbg.measureText(s));val pad=8f*d;val lh=21f*d;val l=6f*d;val t=6f*d;c.drawRoundRect(RectF(l,t,l+mw+2*pad,t+lh*lines.size+pad),8f*d,8f*d,dbgBg);var y=t+19f*d;for(s in lines){c.drawText(s,l+pad,y,dbg);y+=lh}}
     private fun drawHorizon(c:Canvas){if(!virtual.ready)return;val y=norm(0.5f,virtual.horizonNorm).second;c.drawLine(0f,y,width.toFloat(),y,hz);dbg.textSize=10.5f*sd;c.drawText("model horizon",7f*d,y-4f*d,dbg)}
     private fun drawWarnings(c:Canvas){val now=SystemClock.elapsedRealtime();val text=when{snapshot.warnings.fcwLevel>=3->"NGUY CƠ VA CHẠM";snapshot.warnings.hmwWarning->"KHOẢNG CÁCH QUÁ GẦN";snapshot.warnings.ldwWarning->"CHÚ Ý LỆCH LÀN";now<movedUntil->"XE PHÍA TRƯỚC DI CHUYỂN";now<calUntil->"HIỆU CHỈNH CAMERA THÀNH CÔNG";else->null}?:return;banner.textSize=19f*sd;val bw=banner.measureText(text)+34f*d;val bh=43f*d;val l=(width-bw)/2f;val t=height-62f*d;c.drawRoundRect(RectF(l,t,l+bw,t+bh),12f*d,12f*d,if(snapshot.warnings.fcwLevel>=3||snapshot.warnings.hmwWarning||snapshot.warnings.ldwWarning)warn else success);c.drawText(text,width/2f,t+29f*d,banner)}

@@ -24,23 +24,30 @@ class SupercomboAdasEngine {
     private var stopBaseline=-1f
     private var moveEvidence=0
     private var moveAlerted=false
+    private var lastGateReason="SEARCH"
 
     fun update(result: SupercomboResult?, lane: AdasLaneGeometry, hoodTopNorm: Float, speedKph: Float?, nowMs: Long): AdasSnapshot {
-        val hint=result?.leadHint?.takeIf { it.distanceMeters.isFinite() && it.distanceMeters in 1.5f..210f }
+        val rawHint=result?.leadHint?.takeIf { it.distanceMeters.isFinite() && it.distanceMeters in 1.5f..210f }
+        val hint=rawHint?.takeIf { leadGate(it,result?.path.orEmpty(),speedKph,leadLocked) }
         val newSample=result!=null && result.timestampMs!=lastSampleMs
         if(newSample){
             lastSampleMs=result!!.timestampMs
             if(!leadLocked){
-                if(hint!=null && hint.probability>=0.28f){
+                if(hint!=null){
                     leadLocked=true;leadMisses=0;lastLeadSeenMs=nowMs;lastLeadProb=hint.probability
                     updateDistance(hint.distanceMeters,result.timestampMs)
+                    lastGateReason="LOCK"
+                } else {
+                    lastGateReason=leadGateReason(rawHint,result.path,speedKph,false)
                 }
             } else {
-                if(hint!=null && hint.probability>=0.12f){
+                if(hint!=null){
                     leadMisses=0;lastLeadSeenMs=nowMs;lastLeadProb=hint.probability
                     updateDistance(hint.distanceMeters,result.timestampMs)
+                    lastGateReason="LOCK"
                 } else {
                     leadMisses++
+                    lastGateReason=leadGateReason(rawHint,result.path,speedKph,true)
                 }
             }
         }
@@ -64,8 +71,62 @@ class SupercomboAdasEngine {
             lane=lane, hoodTopNorm=hoodTopNorm,
             warnings=AdasWarnings(fcw,hmw,ldw.first,ldw.second,moved,vf,vl),
             leadDistanceSource=if(vehicle!=null) "SPC" else "NONE",
-            leadYoloDistanceMeters=null, leadSupercomboDistanceMeters=hint?.distanceMeters?:vehicle?.distanceMeters,
-            leadSupercomboProbability=hint?.probability?:if(vehicle!=null)lastLeadProb else null, debugText=if(leadLocked)"SPC LEAD LOCK" else "SPC SEARCH")
+            leadYoloDistanceMeters=null, leadSupercomboDistanceMeters=rawHint?.distanceMeters?:vehicle?.distanceMeters,
+            leadSupercomboProbability=rawHint?.probability?:if(vehicle!=null)lastLeadProb else null, debugText=lastGateReason)
+    }
+
+    private fun pathYAt(path:List<SupercomboPoint>,x:Float):Float{
+        if(path.isEmpty())return 0f
+        var best=path[0]
+        var bestDelta=Float.MAX_VALUE
+        for(p in path){
+            val d=abs(p.forwardMeters-x)
+            if(d<bestDelta){best=p;bestDelta=d}
+        }
+        return best.lateralMeters
+    }
+
+    private fun maxTrackDistance(speed:Float?):Float{
+        val s=speed?:0f
+        return when{
+            s>=70f->120f
+            s>=50f->95f
+            s>=30f->75f
+            else->55f
+        }
+    }
+
+    private fun requiredProb(distance:Float,locked:Boolean):Float{
+        val acquire=when{
+            distance<=30f->0.22f
+            distance<=50f->0.30f
+            distance<=70f->0.45f
+            else->0.65f
+        }
+        return if(locked)(acquire-0.12f).coerceAtLeast(0.14f) else acquire
+    }
+
+    private fun leadGate(h:SupercomboLeadHint,path:List<SupercomboPoint>,speed:Float?,locked:Boolean):Boolean{
+        val maxD=maxTrackDistance(speed)
+        if(h.distanceMeters>maxD)return false
+        val pathY=pathYAt(path,h.distanceMeters)
+        val lateralError=abs(h.lateralMeters-pathY)
+        val corridor=if(h.distanceMeters<=35f)1.65f else 1.95f
+        if(lateralError>corridor)return false
+        return h.probability>=requiredProb(h.distanceMeters,locked)
+    }
+
+    private fun leadGateReason(h:SupercomboLeadHint?,path:List<SupercomboPoint>,speed:Float?,locked:Boolean):String{
+        if(h==null)return "NO_LEAD"
+        val maxD=maxTrackDistance(speed)
+        if(h.distanceMeters>maxD)return "DROP_FAR ${h.distanceMeters.toInt()}m>${maxD.toInt()}m"
+        val pathY=pathYAt(path,h.distanceMeters)
+        val lateralError=abs(h.lateralMeters-pathY)
+        val corridor=if(h.distanceMeters<=35f)1.65f else 1.95f
+        if(lateralError>corridor)return "DROP_SIDE ${"%.1f".format(lateralError)}m"
+        val need=requiredProb(h.distanceMeters,locked)
+        if(h.probability<need)return "DROP_PROB ${(h.probability*100).toInt()}<${(need*100).toInt()}"
+        return "LOCK"
     }
 
     private fun updateDistance(raw:Float,t:Long){
@@ -99,5 +160,5 @@ class SupercomboAdasEngine {
         if(moveEvidence>=2){moveAlerted=true;return true};return false
     }
     private fun synthetic(prob:Float)=Detection(-1,prob.coerceIn(0f,1f),0.47f,0.48f,0.53f,0.56f)
-    private fun clearLead(){leadLocked=false;leadMisses=0;lastLeadProb=0f;distance=-1f;prevDistance=-1f;prevTime=0L;closing=0f;fcwLevel=0;fcwEvidence=0;hmwEvidence=0;stopStart=0L;moveEvidence=0;moveAlerted=false}
+    private fun clearLead(){leadLocked=false;leadMisses=0;lastLeadProb=0f;lastGateReason="SEARCH";distance=-1f;prevDistance=-1f;prevTime=0L;closing=0f;fcwLevel=0;fcwEvidence=0;hmwEvidence=0;stopStart=0L;moveEvidence=0;moveAlerted=false}
 }
