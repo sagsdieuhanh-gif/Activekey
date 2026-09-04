@@ -461,23 +461,50 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun metricsText():String {
-        val sc=freshSupercombo()
-        val snap=latestSnapshot
-        fun fm(v:Float?)=v?.let{String.format(Locale.US,"%.1f m",it)}?:"--"
-        val prob=snap.leadSupercomboProbability?.let{"${(it*100f).roundToInt()}%"}?:"--"
-        val ttc=snap.ttcSeconds?.let{String.format(Locale.US,"%.1f s",it)}?:"--"
-        return buildString{
-            append("MODE: ${features.presetName()}
-")
-            append("SOURCE: ${snap.leadDistanceSource} • OUT: ${fm(snap.lead?.distanceMeters)} • TTC: $ttc
-")
-            append("YOLO DIST: ${fm(snap.leadYoloDistanceMeters)}
-")
-            append("SC DIST: ${fm(snap.leadSupercomboDistanceMeters)} • CONF: $prob
-")
-            append("YOLOX: ${roadInferenceMs.roundToInt()} ms • UFLD: ${laneInferenceMs.roundToInt()} ms
-")
-            append("SC: ${scInferenceMs.roundToInt()} ms • LANE ${sc?.laneGeometry?.confidence?.let{String.format(Locale.US,"%.2f",it)}?:"--"}")
+        val sc =
+            freshSupercombo()
+
+        val snap =
+            latestSnapshot
+
+        fun fm(
+            value: Float?,
+        ): String =
+            value
+                ?.let {
+                    String.format(
+                        Locale.US,
+                        "%.1f m",
+                        it,
+                    )
+                }
+                ?: "--"
+
+        val prob =
+            snap.leadSupercomboProbability
+                ?.let {
+                    "${(it * 100f).roundToInt()}%"
+                }
+                ?: "--"
+
+        val ttc =
+            snap.ttcSeconds
+                ?.let {
+                    String.format(
+                        Locale.US,
+                        "%.1f s",
+                        it,
+                    )
+                }
+                ?: "--"
+
+        return buildString {
+            append("MODE: ${features.presetName()}\n")
+            append("SOURCE: ${snap.leadDistanceSource} • OUT: ${fm(snap.lead?.distanceMeters)} • TTC: $ttc\n")
+            append("YOLO DIST: ${fm(snap.leadYoloDistanceMeters)}\n")
+            append("SC DIST: ${fm(snap.leadSupercomboDistanceMeters)} • CONF: $prob\n")
+            append("YOLOX: ${roadInferenceMs.roundToInt()} ms • UFLD: ${laneInferenceMs.roundToInt()} ms\n")
+            append("SC: ${scInferenceMs.roundToInt()} ms • LANE ${sc?.laneGeometry?.confidence?.let { String.format(Locale.US, "%.2f", it) } ?: "--"}")
         }
     }
 

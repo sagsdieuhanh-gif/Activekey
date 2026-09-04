@@ -2109,6 +2109,9 @@ class AdasDecisionEngine {
         private const val MIN_CLOSING_SPEED =
             0.70f
 
+        private const val SC_DISTANCE_MIN_PROB =
+            0.55f
+
         private const val CAMERA_HEIGHT_M =
             1.25f
 
