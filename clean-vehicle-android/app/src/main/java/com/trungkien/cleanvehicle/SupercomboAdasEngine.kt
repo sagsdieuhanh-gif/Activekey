@@ -5,6 +5,9 @@ import kotlin.math.abs
 class SupercomboAdasEngine {
     private var lastLeadSeenMs=0L
     private var lastSampleMs=0L
+    private var leadLocked=false
+    private var leadMisses=0
+    private var lastLeadProb=0f
     private var distance=-1f
     private var prevDistance=-1f
     private var prevTime=0L
@@ -23,12 +26,27 @@ class SupercomboAdasEngine {
     private var moveAlerted=false
 
     fun update(result: SupercomboResult?, lane: AdasLaneGeometry, hoodTopNorm: Float, speedKph: Float?, nowMs: Long): AdasSnapshot {
-        val hint=result?.leadHint?.takeIf { it.probability>=0.45f && it.distanceMeters in 1.5f..200f }
-        if(hint!=null && result!=null && result.timestampMs!=lastSampleMs){
-            lastSampleMs=result.timestampMs; lastLeadSeenMs=nowMs; updateDistance(hint.distanceMeters,result.timestampMs)
-        } else if(hint==null && nowMs-lastLeadSeenMs>650L){ clearLead() }
-        val active=distance>0f && nowMs-lastLeadSeenMs<=650L
-        val vehicle=if(active) AdasVehicle(1,synthetic(hint?.probability?:0.5f),distance,closing.coerceAtLeast(0f),true,99) else null
+        val hint=result?.leadHint?.takeIf { it.distanceMeters.isFinite() && it.distanceMeters in 1.5f..210f }
+        val newSample=result!=null && result.timestampMs!=lastSampleMs
+        if(newSample){
+            lastSampleMs=result!!.timestampMs
+            if(!leadLocked){
+                if(hint!=null && hint.probability>=0.28f){
+                    leadLocked=true;leadMisses=0;lastLeadSeenMs=nowMs;lastLeadProb=hint.probability
+                    updateDistance(hint.distanceMeters,result.timestampMs)
+                }
+            } else {
+                if(hint!=null && hint.probability>=0.12f){
+                    leadMisses=0;lastLeadSeenMs=nowMs;lastLeadProb=hint.probability
+                    updateDistance(hint.distanceMeters,result.timestampMs)
+                } else {
+                    leadMisses++
+                }
+            }
+        }
+        if(leadLocked && (leadMisses>=4 || nowMs-lastLeadSeenMs>2200L)){ clearLead() }
+        val active=leadLocked && distance>0f
+        val vehicle=if(active) AdasVehicle(1,synthetic(lastLeadProb),distance,closing.coerceAtLeast(0f),true,99) else null
         val ttc=if(vehicle!=null && vehicle.closingSpeedMps>=0.70f) (vehicle.distanceMeters/vehicle.closingSpeedMps).coerceIn(0.2f,30f) else null
         val speedMps=speedKph?.div(3.6f)?.takeIf{it>0.8f}
         val headway=if(vehicle!=null && speedMps!=null) (vehicle.distanceMeters/speedMps).coerceIn(0f,20f) else null
@@ -46,8 +64,8 @@ class SupercomboAdasEngine {
             lane=lane, hoodTopNorm=hoodTopNorm,
             warnings=AdasWarnings(fcw,hmw,ldw.first,ldw.second,moved,vf,vl),
             leadDistanceSource=if(vehicle!=null) "SPC" else "NONE",
-            leadYoloDistanceMeters=null, leadSupercomboDistanceMeters=hint?.distanceMeters,
-            leadSupercomboProbability=hint?.probability, debugText="SPC CORE")
+            leadYoloDistanceMeters=null, leadSupercomboDistanceMeters=hint?.distanceMeters?:vehicle?.distanceMeters,
+            leadSupercomboProbability=hint?.probability?:if(vehicle!=null)lastLeadProb else null, debugText=if(leadLocked)"SPC LEAD LOCK" else "SPC SEARCH")
     }
 
     private fun updateDistance(raw:Float,t:Long){
@@ -81,5 +99,5 @@ class SupercomboAdasEngine {
         if(moveEvidence>=2){moveAlerted=true;return true};return false
     }
     private fun synthetic(prob:Float)=Detection(-1,prob.coerceIn(0f,1f),0.47f,0.48f,0.53f,0.56f)
-    private fun clearLead(){distance=-1f;prevDistance=-1f;prevTime=0L;closing=0f;fcwLevel=0;fcwEvidence=0;hmwEvidence=0;stopStart=0L;moveEvidence=0;moveAlerted=false}
+    private fun clearLead(){leadLocked=false;leadMisses=0;lastLeadProb=0f;distance=-1f;prevDistance=-1f;prevTime=0L;closing=0f;fcwLevel=0;fcwEvidence=0;hmwEvidence=0;stopStart=0L;moveEvidence=0;moveAlerted=false}
 }

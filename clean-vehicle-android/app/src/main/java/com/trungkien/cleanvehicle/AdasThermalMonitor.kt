@@ -30,13 +30,16 @@ class AdasThermalMonitor(private val context: Context) {
         }
         return AdasThermalState(status, temp, label, throttled)
     }
-    fun supercomboStride(enabled: Boolean): Long {
-        if (!enabled) return 1L
+    fun supercomboStride(enabled: Boolean): Long = 1L
+
+    fun ufldHelperStride(enabled: Boolean): Long {
+        if (!enabled) return 4L
         val s = sample()
         return when {
-            s.status >= 3 || (s.batteryTempC ?: 0f) >= 47f -> 3L
-            s.throttled -> 2L
-            else -> 1L
+            s.status >= 4 || (s.batteryTempC ?: 0f) >= 48f -> 18L
+            s.status >= 3 || (s.batteryTempC ?: 0f) >= 46f -> 14L
+            s.throttled -> 8L
+            else -> 4L
         }
     }
 }

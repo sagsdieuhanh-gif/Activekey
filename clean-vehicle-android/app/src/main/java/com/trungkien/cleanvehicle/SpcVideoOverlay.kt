@@ -23,6 +23,8 @@ class SpcVideoOverlay(context:Context):View(context){
     private val danger=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.STROKE;strokeWidth=7f*d;strokeCap=Paint.Cap.ROUND;color=Color.rgb(255,72,58)}
     private val edge=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.STROKE;strokeWidth=2f*d;color=Color.argb(145,225,240,245)}
     private val lead=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.FILL;color=Color.rgb(255,185,43)}
+    private val leadBox=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.STROKE;strokeWidth=4f*d;strokeCap=Paint.Cap.ROUND;color=Color.rgb(255,174,24)}
+    private val leadTxt=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.rgb(255,205,92);textAlign=Paint.Align.CENTER;typeface=Typeface.DEFAULT_BOLD}
     private val hudBg=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(172,9,21,25)}
     private val dist=Paint(Paint.ANTI_ALIAS_FLAG).apply{textAlign=Paint.Align.CENTER;typeface=Typeface.DEFAULT_BOLD}
     private val speed=Paint(Paint.ANTI_ALIAS_FLAG).apply{textAlign=Paint.Align.CENTER;typeface=Typeface.DEFAULT_BOLD;color=Color.WHITE}
@@ -49,12 +51,29 @@ class SpcVideoOverlay(context:Context):View(context){
         }
         drawPathFill(c,r)
         if(technical)for(e in r.roadEdges)poly(c,e.mapNotNull{project(it,r)},edge)
-        val h=r.leadHint?.takeIf{it.probability>=0.38f&&it.distanceMeters in 2f..180f}?:return
+        val h=r.leadHint?.takeIf{it.probability>=0.12f&&it.distanceMeters in 2f..200f}?:return;if(snapshot.lead==null&&h.probability<0.28f)return
         val far=(h.distanceMeters+1.6f).coerceAtMost(190f);val near=(h.distanceMeters-0.8f).coerceAtLeast(1.6f);val hw=1.15f
         val a=project(SupercomboPoint(far,h.lateralMeters+hw),r)?:return;val b=project(SupercomboPoint(far,h.lateralMeters-hw),r)?:return;val cc=project(SupercomboPoint(near,h.lateralMeters-hw),r)?:return;val e=project(SupercomboPoint(near,h.lateralMeters+hw),r)?:return
-        val p=Path();p.moveTo(a.first,a.second);p.lineTo(b.first,b.second);p.lineTo(cc.first,cc.second);p.lineTo(e.first,e.second);p.close();c.drawPath(p,lead)
+        val p=Path();p.moveTo(a.first,a.second);p.lineTo(b.first,b.second);p.lineTo(cc.first,cc.second);p.lineTo(e.first,e.second);p.close();c.drawPath(p,lead);drawLeadReticle(c,r,h)
     }
-    private fun drawPathFill(c:Canvas,r:SupercomboResult){val l=ArrayList<Pair<Float,Float>>();val rr=ArrayList<Pair<Float,Float>>();for(q in r.path){if(q.forwardMeters !in 3f..120f)continue;val a=project(q.copy(lateralMeters=q.lateralMeters+0.72f),r);val b=project(q.copy(lateralMeters=q.lateralMeters-0.72f),r);if(a!=null&&b!=null){l+=a;rr+=b}};if(l.size<4)return;val p=Path();p.moveTo(l[0].first,l[0].second);for(i in 1 until l.size)p.lineTo(l[i].first,l[i].second);for(i in rr.size-1 downTo 0)p.lineTo(rr[i].first,rr[i].second);p.close();c.drawPath(p,center)}
+    private fun drawLeadReticle(c:Canvas,r:SupercomboResult,h:SupercomboLeadHint){
+        val distNow=snapshot.lead?.distanceMeters?:h.distanceMeters
+        val ground=project(SupercomboPoint(distNow,h.lateralMeters,0f),r)?:return
+        val size=(width.toFloat()/distNow.coerceAtLeast(5f)*1.45f).coerceIn(22f*d,105f*d)
+        val cx=ground.first
+        val cy=(ground.second-size*.55f).coerceAtLeast(0f)
+        val half=size*.50f
+        val corner=size*.27f
+        fun ln(x1:Float,y1:Float,x2:Float,y2:Float){c.drawLine(x1,y1,x2,y2,leadBox)}
+        ln(cx-half,cy-half,cx-half+corner,cy-half);ln(cx-half,cy-half,cx-half,cy-half+corner)
+        ln(cx+half,cy-half,cx+half-corner,cy-half);ln(cx+half,cy-half,cx+half,cy-half+corner)
+        ln(cx-half,cy+half,cx-half+corner,cy+half);ln(cx-half,cy+half,cx-half,cy+half-corner)
+        ln(cx+half,cy+half,cx+half-corner,cy+half);ln(cx+half,cy+half,cx+half,cy+half-corner)
+        leadTxt.textSize=12.5f*sd
+        c.drawText("SPC ${String.format(Locale.US,"%.1f m",distNow)} • ${(h.probability*100f).toInt()}%",cx,cy-half-8f*d,leadTxt)
+    }
+
+    private fun drawPathFill(c:Canvas,r:SupercomboResult){val l=ArrayList<Pair<Float,Float>>();val rr=ArrayList<Pair<Float,Float>>();for(q in r.path){if(q.forwardMeters !in 3f..120f)continue;val a=project(q.copy(lateralMeters=q.lateralMeters+0.45f),r);val b=project(q.copy(lateralMeters=q.lateralMeters-0.45f),r);if(a!=null&&b!=null){l+=a;rr+=b}};if(l.size<4)return;val p=Path();p.moveTo(l[0].first,l[0].second);for(i in 1 until l.size)p.lineTo(l[i].first,l[i].second);for(i in rr.size-1 downTo 0)p.lineTo(rr[i].first,rr[i].second);p.close();c.drawPath(p,center)}
     private fun drawHud(c:Canvas){val v=snapshot.lead?:return;val w=minOf(width*.46f,430f*d);val h=minOf(height*.40f,205f*d);val l=(width-w)/2f;val t=12f*d;c.drawRoundRect(RectF(l,t,l+w,t+h),26f*d,26f*d,hudBg);dist.textSize=minOf(94f*sd,h*.54f);dist.color=if(snapshot.warnings.fcwLevel>=3)Color.rgb(255,88,68)else Color.rgb(162,245,145);c.drawText(String.format(Locale.US,"%.1f m",v.distanceMeters),width/2f,t+h*.55f,dist);speed.textSize=minOf(34f*sd,h*.19f);c.drawText(snapshot.speedKph?.let{"${it.toInt()} km/h"}?:"-- km/h",width/2f,t+h*.82f,speed)}
     private fun drawDebug(c:Canvas){val r=result;dbg.textSize=13.5f*sd;val p=r?.laneProbabilities?:floatArrayOf(0f,0f,0f,0f);val conf=minOf(p.getOrElse(1){0f},p.getOrElse(2){0f});val lines=listOf(
         "fps ${String.format(Locale.US,"%.1f",fps)} | ${r?.runtimeName?:"SPC WAIT"} ${r?.inferenceMs?.toInt()?:0}ms x2",
@@ -65,8 +84,8 @@ class SpcVideoOverlay(context:Context):View(context){
         var mw=0f;for(s in lines)mw=max(mw,dbg.measureText(s));val pad=8f*d;val lh=21f*d;val l=6f*d;val t=6f*d;c.drawRoundRect(RectF(l,t,l+mw+2*pad,t+lh*lines.size+pad),8f*d,8f*d,dbgBg);var y=t+19f*d;for(s in lines){c.drawText(s,l+pad,y,dbg);y+=lh}}
     private fun drawHorizon(c:Canvas){if(!virtual.ready)return;val y=norm(0.5f,virtual.horizonNorm).second;c.drawLine(0f,y,width.toFloat(),y,hz);dbg.textSize=10.5f*sd;c.drawText("model horizon",7f*d,y-4f*d,dbg)}
     private fun drawWarnings(c:Canvas){val now=SystemClock.elapsedRealtime();val text=when{snapshot.warnings.fcwLevel>=3->"NGUY CƠ VA CHẠM";snapshot.warnings.hmwWarning->"KHOẢNG CÁCH QUÁ GẦN";snapshot.warnings.ldwWarning->"CHÚ Ý LỆCH LÀN";now<movedUntil->"XE PHÍA TRƯỚC DI CHUYỂN";now<calUntil->"HIỆU CHỈNH CAMERA THÀNH CÔNG";else->null}?:return;banner.textSize=19f*sd;val bw=banner.measureText(text)+34f*d;val bh=43f*d;val l=(width-bw)/2f;val t=height-62f*d;c.drawRoundRect(RectF(l,t,l+bw,t+bh),12f*d,12f*d,if(snapshot.warnings.fcwLevel>=3||snapshot.warnings.hmwWarning||snapshot.warnings.ldwWarning)warn else success);c.drawText(text,width/2f,t+29f*d,banner)}
-    private fun drawThermal(c:Canvas){if(!thermal.throttled)return;val text="${thermal.label} • GIẢM TẢI SPC";banner.textSize=11.5f*sd;val bw=banner.measureText(text)+22f*d;val bh=32f*d;val r=width-8f*d;val l=r-bw;val t=58f*d;c.drawRoundRect(RectF(l,t,r,t+bh),7f*d,7f*d,warn);c.drawText(text,(l+r)/2f,t+22f*d,banner)}
-    private fun project(q:SupercomboPoint,r:SupercomboResult):Pair<Float,Float>?{val f=q.forwardMeters;if(!f.isFinite()||f<1.5f||f>190f)return null;val x=virtual.centerXNorm-virtual.fxRatio*q.lateralMeters/f;val y=virtual.horizonNorm+virtual.fyRatio*(1.25f-q.heightMeters)/f;if(!x.isFinite()||!y.isFinite()||y<virtual.horizonNorm-.02f||y>1.08f)return null;return norm(x,y,r.sourceWidth,r.sourceHeight)}
+    private fun drawThermal(c:Canvas){if(!thermal.throttled)return;val text="${thermal.label} • NÊN TẮT HIỂN THỊ";banner.textSize=11.5f*sd;val bw=banner.measureText(text)+22f*d;val bh=32f*d;val r=width-8f*d;val l=r-bw;val t=58f*d;c.drawRoundRect(RectF(l,t,r,t+bh),7f*d,7f*d,warn);c.drawText(text,(l+r)/2f,t+22f*d,banner)}
+    private fun project(q:SupercomboPoint,r:SupercomboResult):Pair<Float,Float>?{val f=q.forwardMeters;if(!f.isFinite()||f<1.5f||f>190f)return null;val hz=virtual.horizonNorm.coerceIn(0.24f,0.68f);val cx=virtual.centerXNorm.coerceIn(0.28f,0.72f);val x=cx-virtual.fxRatio*q.lateralMeters/f;val groundScale=(0.94f-hz)*3.0f;val heightFactor=((1.25f-q.heightMeters)/1.25f).coerceIn(0.40f,1.35f);val y=hz+groundScale/f*heightFactor;if(!x.isFinite()||!y.isFinite()||y<hz-.02f||y>1.08f)return null;return norm(x,y,r.sourceWidth,r.sourceHeight)}
     private fun norm(x:Float,y:Float,sw0:Int=virtual.sourceWidth,sh0:Int=virtual.sourceHeight):Pair<Float,Float>{val sw=sw0.coerceAtLeast(1).toFloat();val sh=sh0.coerceAtLeast(1).toFloat();val s=maxOf(width/sw,height/sh);return (width-sw*s)*.5f+x*sw*s to (height-sh*s)*.5f+y*sh*s}
     private fun poly(c:Canvas,p:List<Pair<Float,Float>>,paint:Paint){if(p.size<3)return;val path=Path();path.moveTo(p[0].first,p[0].second);for(i in 1 until p.size)path.lineTo(p[i].first,p[i].second);c.drawPath(path,paint)}
 }

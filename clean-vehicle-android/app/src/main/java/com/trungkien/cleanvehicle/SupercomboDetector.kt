@@ -270,17 +270,21 @@ class SupercomboDetector(modelFile: File) : Closeable {
     }
 
     private fun warpVirtual(u: Float, v: Float): Pair<Float, Float> {
-        val s = virtualCameraState
-        if (!s.ready && s.featureSamples < 6) return u to (0.055f + v * 0.925f).coerceIn(0f, 1f)
-        val h = s.horizonNorm.coerceIn(0.30f, 0.68f)
-        val cx = s.centerXNorm.coerceIn(0.30f, 0.70f)
-        val vs = ((0.985f - h)/(0.985f - MODEL_HORIZON)).coerceIn(0.70f, 1.45f)
-        val us = (s.fxRatio/VIRTUAL_FX_RATIO).coerceIn(0.70f, 1.45f)
-        val bu = cx + (u - 0.5f) * us
-        val bv = h + (v - MODEL_HORIZON) * vs
-        val roll = s.rollDeg * 0.017453292f
-        val dx = bu - cx; val dy = bv - h
-        return (cx + dx - dy * roll * 0.72f).coerceIn(0f, 1f) to (h + dy + dx * roll * 0.42f).coerceIn(0f, 1f)
+        val baseV=(0.055f+v*0.925f).coerceIn(0f,1f)
+        val s=virtualCameraState
+        if(!s.ready&&s.featureSamples<6)return u to baseV
+        val h=s.horizonNorm.coerceIn(0.30f,0.68f)
+        val cx=s.centerXNorm.coerceIn(0.30f,0.70f)
+        val vs=((0.985f-h)/(0.985f-MODEL_HORIZON)).coerceIn(0.88f,1.12f)
+        val us=(s.fxRatio/VIRTUAL_FX_RATIO).coerceIn(0.88f,1.12f)
+        val vu=cx+(u-0.5f)*us
+        val vv=h+(v-MODEL_HORIZON)*vs
+        val roll=s.rollDeg*0.017453292f
+        val dx=vu-cx;val dy=vv-h
+        val cu=cx+dx-dy*roll*0.42f
+        val cv=h+dy+dx*roll*0.24f
+        val strength=(0.18f+s.calibrationQuality*0.27f).coerceIn(0.18f,0.45f)
+        return (u*(1f-strength)+cu*strength).coerceIn(0f,1f) to (baseV*(1f-strength)+cv*strength).coerceIn(0f,1f)
     }
 
     private fun rgbAt(image: ImageProxy, rowStride: Int, pixelStride: Int, rotation: Int, u: Float, v: Float): Int {

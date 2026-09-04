@@ -33,7 +33,7 @@ class V42SettingsDialog(
     override fun onStart(){super.onStart();val dm=context.resources.displayMetrics;window?.setLayout((dm.widthPixels*.90f).toInt(),(dm.heightPixels*.95f).toInt());refresh()}
     private fun build():View{
         val s=ScrollView(context).apply{isFillViewport=true;setBackgroundColor(Color.rgb(5,12,20))};val r=LinearLayout(context).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(24),dp(18),dp(24),dp(30))};s.addView(r,ViewGroup.LayoutParams(-1,-2))
-        r.addView(title("TrungKien ADAS",28f,Color.WHITE));r.addView(title("V4.2 • SPC CORE • VIDEO MODE",14f,Color.rgb(56,232,194)))
+        r.addView(title("TrungKien ADAS",28f,Color.WHITE));r.addView(title("V4.2.1 • SPC CORE • LEAD LOCK",14f,Color.rgb(56,232,194)))
         r.addView(card("SUPERCOMBO LÀ NỀN CHÍNH","YOLO đã loại khỏi runtime/model. SPC trực tiếp path, lane, road edge, lead distance, TTC/HMW/FCW. UFLD chỉ calibration/fallback lane."))
         r.addView(section("SPC CORE"))
         toggle(r,"SPC Path / Lane / Road edge","Hành lang xanh và 33 điểm model.",config.supercomboLanePath){save(config.copy(supercomboLanePath=it))}
