@@ -14,50 +14,33 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: android-actions/setup-android@v3
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-
       - name: Install Android SDK
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
-
-      - name: Download AI models
+      - name: Download SPC and calibration models
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p clean-vehicle-android/app/src/main/assets /tmp/ufld
-
-          curl -L --fail --retry 5 --connect-timeout 30 \
-            "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx" \
-            -o clean-vehicle-android/app/src/main/assets/yolox_tiny.onnx
-          test "$(stat -c%s clean-vehicle-android/app/src/main/assets/yolox_tiny.onnx)" -gt 5000000
-
-          curl -L --fail --retry 5 --connect-timeout 30 \
-            "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/140_Ultra-Fast-Lane-Detection/resources_culane.tar.gz" \
-            -o /tmp/ufld.tar.gz
+          rm -f clean-vehicle-android/app/src/main/assets/yolox_tiny.onnx
+          echo "YOLO model disabled in V4.2 SPC CORE"
+          curl -L --fail --retry 5 --connect-timeout 30 "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/140_Ultra-Fast-Lane-Detection/resources_culane.tar.gz" -o /tmp/ufld.tar.gz
           tar -xzf /tmp/ufld.tar.gz -C /tmp/ufld
-          cp /tmp/ufld/saved_model_culane/ultra_falst_lane_detection_culane_288x800.onnx \
-            clean-vehicle-android/app/src/main/assets/ufld_culane.onnx
+          cp /tmp/ufld/saved_model_culane/ultra_falst_lane_detection_culane_288x800.onnx clean-vehicle-android/app/src/main/assets/ufld_culane.onnx
           test "$(stat -c%s clean-vehicle-android/app/src/main/assets/ufld_culane.onnx)" = "178076232"
           echo "3b86cf67c0de36af8e8e793317c3475978ecb4c6395c4292d0bd51d3ada53491  clean-vehicle-android/app/src/main/assets/ufld_culane.onnx" | sha256sum -c -
-
-          curl -L --fail --retry 5 --connect-timeout 30 \
-            "https://raw.githubusercontent.com/take1014/openpilot-runner/5f0ac7695125ed2d7a240a3814d7da1f839f3bc3/models/supercombo.onnx" \
-            -o clean-vehicle-android/app/src/main/assets/supercombo.onnx
+          curl -L --fail --retry 5 --connect-timeout 30 "https://raw.githubusercontent.com/take1014/openpilot-runner/5f0ac7695125ed2d7a240a3814d7da1f839f3bc3/models/supercombo.onnx" -o clean-vehicle-android/app/src/main/assets/supercombo.onnx
           test "$(stat -c%s clean-vehicle-android/app/src/main/assets/supercombo.onnx)" = "57554657"
           sha256sum clean-vehicle-android/app/src/main/assets/supercombo.onnx
-
       - name: Restore stable signing key
         shell: bash
         env:
@@ -67,7 +50,6 @@ jobs:
           test -n "$KEYSTORE_B64"
           echo "$KEYSTORE_B64" | base64 -d > clean-vehicle-android/app/trungkien-release.jks
           test -s clean-vehicle-android/app/trungkien-release.jks
-
       - name: Print signing certificate fingerprint
         shell: bash
         env:
@@ -75,11 +57,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.TK_ADAS_KEY_ALIAS }}
         run: |
           set -euo pipefail
-          keytool -list -v \
-            -keystore clean-vehicle-android/app/trungkien-release.jks \
-            -storepass "$STORE_PASSWORD" \
-            -alias "$KEY_ALIAS" | grep -E "SHA256:|Alias name:"
-
+          keytool -list -v -keystore clean-vehicle-android/app/trungkien-release.jks -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" | grep -E "SHA256:|Alias name:"
       - name: Build signed TrungKien ADAS
         working-directory: clean-vehicle-android
         env:
@@ -88,7 +66,6 @@ jobs:
           TK_ADAS_KEY_ALIAS: ${{ secrets.TK_ADAS_KEY_ALIAS }}
           TK_ADAS_KEY_PASSWORD: ${{ secrets.TK_ADAS_KEY_PASSWORD }}
         run: gradle --no-daemon clean :app:assembleRelease --stacktrace
-
       - name: Verify signed APK
         shell: bash
         run: |
@@ -96,39 +73,27 @@ jobs:
           APK="clean-vehicle-android/app/build/outputs/apk/release/app-release.apk"
           test -f "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
-
           VERSION_NAME="$(grep -oP 'versionName\s*=\s*"\K[^"]+' clean-vehicle-android/app/build.gradle.kts | head -n1)"
           cp "$APK" "clean-vehicle-android/app/build/outputs/apk/release/TrungKien ADAS ${VERSION_NAME}.apk"
-
       - name: Upload Actions artifact
         uses: actions/upload-artifact@v4
         with:
           name: TrungKien-ADAS-Stable
           path: "clean-vehicle-android/app/build/outputs/apk/release/TrungKien ADAS *.apk"
-
       - name: Publish client auto-update release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-
           VERSION_NAME="$(grep -oP 'versionName\s*=\s*"\K[^"]+' clean-vehicle-android/app/build.gradle.kts | head -n1)"
           VERSION_CODE="$(grep -oP 'versionCode\s*=\s*\K[0-9]+' clean-vehicle-android/app/build.gradle.kts | head -n1)"
-
           TAG="trungkien-adas-${VERSION_CODE}-v${VERSION_NAME}"
           SOURCE_APK="clean-vehicle-android/app/build/outputs/apk/release/app-release.apk"
           ASSET="/tmp/TrungKien_ADAS_${VERSION_NAME}.apk"
-
           cp "$SOURCE_APK" "$ASSET"
-
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$ASSET" \
-              --repo "$GITHUB_REPOSITORY" \
-              --clobber
+            gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$TAG" "$ASSET" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "TrungKien ADAS ${VERSION_NAME}" \
-              --notes "Stable signed client update. Package com.trungkien.adas."
+            gh release create "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --title "TrungKien ADAS ${VERSION_NAME}" --notes "SPC CORE VIDEO MODE stable signed update. YOLO runtime/model removed."
           fi
