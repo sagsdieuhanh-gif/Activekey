@@ -1,4 +1,4 @@
-name: TrungKien ADAS V3 Stable
+name: TrungKien ADAS V4 Stable
 
 on:
   workflow_dispatch:
@@ -74,7 +74,7 @@ jobs:
             -storepass "$STORE_PASSWORD" \
             -alias "$KEY_ALIAS" | grep -E "SHA256:|Alias name:"
 
-      - name: Build signed TrungKien ADAS V3
+      - name: Build signed TrungKien ADAS V4
         working-directory: clean-vehicle-android
         env:
           TK_ADAS_KEYSTORE_FILE: trungkien-release.jks
@@ -90,9 +90,9 @@ jobs:
           APK="clean-vehicle-android/app/build/outputs/apk/release/app-release.apk"
           test -f "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
-          cp "$APK" "clean-vehicle-android/app/build/outputs/apk/release/TrungKien ADAS V3.0.apk"
+          cp "$APK" "clean-vehicle-android/app/build/outputs/apk/release/TrungKien ADAS V4.0.apk"
 
       - uses: actions/upload-artifact@v4
         with:
           name: TrungKien-ADAS-Stable
-          path: "clean-vehicle-android/app/build/outputs/apk/release/TrungKien ADAS V3.0.apk"
+          path: "clean-vehicle-android/app/build/outputs/apk/release/TrungKien ADAS V4.0.apk"

@@ -1,5 +1,12 @@
 package com.trungkien.cleanvehicle
 
+enum class LeadDistanceMode {
+    AUTO,
+    SUPERCOMBO,
+    YOLO,
+}
+
+
 data class AdasLaneGeometry(
     val valid: Boolean = false,
     val leftA: Float = 0f,
@@ -57,5 +64,9 @@ data class AdasSnapshot(
     val lane: AdasLaneGeometry = AdasLaneGeometry(),
     val hoodTopNorm: Float = 0.90f,
     val warnings: AdasWarnings = AdasWarnings(),
+    val leadDistanceSource: String = "NONE",
+    val leadYoloDistanceMeters: Float? = null,
+    val leadSupercomboDistanceMeters: Float? = null,
+    val leadSupercomboProbability: Float? = null,
     val debugText: String = "",
 )

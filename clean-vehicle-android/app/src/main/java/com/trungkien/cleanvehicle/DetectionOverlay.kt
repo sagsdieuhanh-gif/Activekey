@@ -1001,6 +1001,11 @@ class DetectionOverlay(
                     )
                 )
 
+                if (snapshot.leadDistanceSource != "NONE") {
+                    append("  ")
+                    append(snapshot.leadDistanceSource)
+                }
+
                 if (
                     snapshot.ttcSeconds !=
                     null

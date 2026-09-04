@@ -5,60 +5,65 @@ import android.content.Context
 data class AdasFeatureConfig(
     val yolox: Boolean = true,
     val ufld: Boolean = true,
-    val supercombo: Boolean = false,
-    val supercomboLanePath: Boolean = false,
-    val supercomboLead: Boolean = false,
-    val fusionSmartLead: Boolean = false,
+    val supercombo: Boolean = true,
+    val supercomboLanePath: Boolean = true,
+    val supercomboLead: Boolean = true,
+    val fusionSmartLead: Boolean = true,
     val fcwHmw: Boolean = true,
     val ldwTlc: Boolean = true,
     val technicalInfo: Boolean = false,
+    val distanceMode: LeadDistanceMode = LeadDistanceMode.AUTO,
 ) {
-    fun presetName(): String = when {
-        yolox && ufld && !supercombo -> "BASELINE"
-        yolox && !ufld && supercombo && supercomboLanePath -> "SUPERCOMBO"
-        yolox && ufld && supercombo && supercomboLanePath -> "HYBRID"
-        else -> "TÙY CHỈNH"
+    fun presetName(): String = when (distanceMode) {
+        LeadDistanceMode.AUTO -> "V4 AUTO"
+        LeadDistanceMode.SUPERCOMBO -> "SC PRIMARY"
+        LeadDistanceMode.YOLO -> "YOLO CHECK"
     }
 
     companion object {
-        fun baseline() = AdasFeatureConfig()
-        fun supercombo() = AdasFeatureConfig(
-            yolox = true,
-            ufld = false,
-            supercombo = true,
-            supercomboLanePath = true,
-            supercomboLead = true,
-            fusionSmartLead = true,
-            fcwHmw = true,
-            ldwTlc = true,
+        fun v4Auto() = AdasFeatureConfig()
+        fun supercomboPrimary() = AdasFeatureConfig(distanceMode = LeadDistanceMode.SUPERCOMBO)
+        fun yoloCheck() = AdasFeatureConfig(distanceMode = LeadDistanceMode.YOLO)
+
+        fun baseline() = yoloCheck().copy(
+            supercombo = false,
+            supercomboLanePath = false,
+            supercomboLead = false,
+            fusionSmartLead = false,
         )
-        fun hybrid() = AdasFeatureConfig(
-            yolox = true,
-            ufld = true,
-            supercombo = true,
-            supercomboLanePath = true,
-            supercomboLead = true,
-            fusionSmartLead = true,
-            fcwHmw = true,
-            ldwTlc = true,
-        )
+        fun supercombo() = supercomboPrimary().copy(ufld = false)
+        fun hybrid() = v4Auto()
     }
 }
 
 class AdasFeatureStore(context: Context) {
-    private val prefs = context.getSharedPreferences("trungkien_adas_v3_features", Context.MODE_PRIVATE)
-
-    fun load(): AdasFeatureConfig = AdasFeatureConfig(
-        yolox = prefs.getBoolean("yolox", true),
-        ufld = prefs.getBoolean("ufld", true),
-        supercombo = prefs.getBoolean("supercombo", false),
-        supercomboLanePath = prefs.getBoolean("sc_lane", false),
-        supercomboLead = prefs.getBoolean("sc_lead", false),
-        fusionSmartLead = prefs.getBoolean("fusion_lead", false),
-        fcwHmw = prefs.getBoolean("fcw_hmw", true),
-        ldwTlc = prefs.getBoolean("ldw_tlc", true),
-        technicalInfo = prefs.getBoolean("technical", false),
+    private val prefs = context.getSharedPreferences(
+        "trungkien_adas_v4_features",
+        Context.MODE_PRIVATE,
     )
+
+    fun load(): AdasFeatureConfig {
+        val d = AdasFeatureConfig.v4Auto()
+        val mode = runCatching {
+            LeadDistanceMode.valueOf(
+                prefs.getString("distance_mode", d.distanceMode.name)
+                    ?: d.distanceMode.name
+            )
+        }.getOrDefault(d.distanceMode)
+
+        return AdasFeatureConfig(
+            yolox = prefs.getBoolean("yolox", d.yolox),
+            ufld = prefs.getBoolean("ufld", d.ufld),
+            supercombo = prefs.getBoolean("supercombo", d.supercombo),
+            supercomboLanePath = prefs.getBoolean("sc_lane", d.supercomboLanePath),
+            supercomboLead = prefs.getBoolean("sc_lead", d.supercomboLead),
+            fusionSmartLead = prefs.getBoolean("fusion_lead", d.fusionSmartLead),
+            fcwHmw = prefs.getBoolean("fcw_hmw", d.fcwHmw),
+            ldwTlc = prefs.getBoolean("ldw_tlc", d.ldwTlc),
+            technicalInfo = prefs.getBoolean("technical", d.technicalInfo),
+            distanceMode = mode,
+        )
+    }
 
     fun save(v: AdasFeatureConfig) {
         prefs.edit()
@@ -71,6 +76,7 @@ class AdasFeatureStore(context: Context) {
             .putBoolean("fcw_hmw", v.fcwHmw)
             .putBoolean("ldw_tlc", v.ldwTlc)
             .putBoolean("technical", v.technicalInfo)
+            .putString("distance_mode", v.distanceMode.name)
             .apply()
     }
 }

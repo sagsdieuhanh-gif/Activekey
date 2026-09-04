@@ -153,7 +153,7 @@ class MainActivity : ComponentActivity() {
             setBackgroundColor(Color.argb(110,0,0,0))
             textSize=11.5f
             setPadding(12,7,12,7)
-            text="TrungKien ADAS V3 • ${features.presetName()}"
+            text="TrungKien ADAS V4 • ${features.presetName()}"
         }
         settingsButton=TextView(this).apply{
             setTextColor(Color.WHITE)
@@ -178,7 +178,7 @@ class MainActivity : ComponentActivity() {
 
     private fun showSettings() {
         licenseManager.stopTrialClock()
-        V3SettingsDialog(
+        V4SettingsDialog(
             context=this,
             licenseManager=licenseManager,
             voice=voice,
@@ -203,7 +203,8 @@ class MainActivity : ComponentActivity() {
 
         if(old.yolox!=newConfig.yolox || old.ufld!=newConfig.ufld ||
             old.supercomboLanePath!=newConfig.supercomboLanePath ||
-            old.fusionSmartLead!=newConfig.fusionSmartLead) {
+            old.fusionSmartLead!=newConfig.fusionSmartLead ||
+            old.distanceMode!=newConfig.distanceMode) {
             decisionEngine=AdasDecisionEngine()
             previousHmwWarning=false
             previousLdwWarning=false
@@ -224,7 +225,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun loadModels() {
-        status.text="TrungKien ADAS V3 • ĐANG NẠP AI..."
+        status.text="TrungKien ADAS V4 • ĐANG NẠP AI..."
         modelExecutor.execute{
             runCatching {
                 val roadFile=copyAsset("yolox_tiny.onnx","yolox_tiny_trungkien_adas.onnx",5_000_000L)
@@ -241,10 +242,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun ensureSupercomboLoaded() {
-        status.text="V3 • ĐANG NẠP SUPERCOMBO..."
+        status.text="V4 • ĐANG NẠP SUPERCOMBO..."
         modelExecutor.execute{
             runCatching{loadSupercomboNow()}
-                .onSuccess{runOnUiThread{status.text="V3 • SUPERCOMBO SẴN SÀNG"}}
+                .onSuccess{runOnUiThread{status.text="V4 • SUPERCOMBO SẴN SÀNG"}}
                 .onFailure{e->runOnUiThread{status.text="LỖI SUPERCOMBO • ${e.message}"}}
         }
     }
@@ -334,8 +335,9 @@ class MainActivity : ComponentActivity() {
 
             val effectiveLane=effectiveLane()
             val detections=if(features.yolox) calibrator.filterSelfVehicle(roadResult.detections) else emptyList()
-            val hint=freshSupercombo()?.leadHint?.takeIf{
-                features.supercombo && features.supercomboLead && features.fusionSmartLead
+            val scResult=freshSupercombo()
+            val hint=scResult?.leadHint?.takeIf{
+                features.supercombo && features.supercomboLead
             }
 
             val rawSnapshot=decisionEngine.update(
@@ -345,6 +347,9 @@ class MainActivity : ComponentActivity() {
                 speedKph=speedProvider.speedKph,
                 nowMs=SystemClock.elapsedRealtime(),
                 leadHint=hint,
+                leadHintTimestampMs=scResult?.timestampMs ?: 0L,
+                useLeadHintForSelection=features.fusionSmartLead,
+                distanceMode=features.distanceMode,
             )
             val snapshot=maskWarnings(rawSnapshot)
             latestSnapshot=snapshot
@@ -457,14 +462,22 @@ class MainActivity : ComponentActivity() {
 
     private fun metricsText():String {
         val sc=freshSupercombo()
+        val snap=latestSnapshot
+        fun fm(v:Float?)=v?.let{String.format(Locale.US,"%.1f m",it)}?:"--"
+        val prob=snap.leadSupercomboProbability?.let{"${(it*100f).roundToInt()}%"}?:"--"
+        val ttc=snap.ttcSeconds?.let{String.format(Locale.US,"%.1f s",it)}?:"--"
         return buildString{
-            append("MODE: ${features.presetName()}\n")
-            append("YOLOX: ${if(features.yolox)"ON" else "OFF"} • ${roadInferenceMs.roundToInt()} ms • n=$roadCounter\n")
-            append("UFLD: ${if(features.ufld)"ON" else "OFF"} • ${laneInferenceMs.roundToInt()} ms • n=$laneCounter\n")
-            append("SUPERCOMBO: ${if(features.supercombo)"ON" else "OFF"} • ${scInferenceMs.roundToInt()} ms • n=$scCounter\n")
-            append("SC LANE: ${sc?.laneGeometry?.confidence?.let{String.format(Locale.US,"%.2f",it)}?:"--"}")
-            append(" • SC LEAD: ${sc?.leadHint?.let{"${it.distanceMeters.roundToInt()}m/${(it.probability*100).roundToInt()}%"}?:"--"}\n")
-            append("FUSION LEAD: ${if(features.fusionSmartLead)"ON" else "OFF"} • FCW/HMW ${if(features.fcwHmw)"ON" else "OFF"} • LDW ${if(features.ldwTlc)"ON" else "OFF"}")
+            append("MODE: ${features.presetName()}
+")
+            append("SOURCE: ${snap.leadDistanceSource} • OUT: ${fm(snap.lead?.distanceMeters)} • TTC: $ttc
+")
+            append("YOLO DIST: ${fm(snap.leadYoloDistanceMeters)}
+")
+            append("SC DIST: ${fm(snap.leadSupercomboDistanceMeters)} • CONF: $prob
+")
+            append("YOLOX: ${roadInferenceMs.roundToInt()} ms • UFLD: ${laneInferenceMs.roundToInt()} ms
+")
+            append("SC: ${scInferenceMs.roundToInt()} ms • LANE ${sc?.laneGeometry?.confidence?.let{String.format(Locale.US,"%.2f",it)}?:"--"}")
         }
     }
 
@@ -478,7 +491,7 @@ class MainActivity : ComponentActivity() {
             status.text=if(features.technicalInfo){
                 metricsText().replace("\n"," • ")
             }else{
-                "V3 • ${features.presetName()} • ${licenseStatusText()} • ${
+                "V4 • ${features.presetName()} • ${licenseStatusText()} • ${
                     when {
                         features.supercombo && freshSupercombo()!=null -> "SC ${scInferenceMs.roundToInt()}ms"
                         lane.locked -> "CAL OK"
@@ -517,6 +530,6 @@ class MainActivity : ComponentActivity() {
 
     companion object{
         private const val UFLD_FILE_SIZE=178_076_232L
-        private const val SC_FRESH_MS=1_800L
+        private const val SC_FRESH_MS=1_200L
     }
 }

@@ -35,6 +35,15 @@ class AdasDecisionEngine {
         val timeToCrossSeconds: Float?,
         val offsetRatio: Float,
     )
+    private data class DistanceDecision(
+        val distanceMeters: Float,
+        val closingSpeedMps: Float,
+        val source: String,
+        val yoloDistanceMeters: Float?,
+        val supercomboDistanceMeters: Float?,
+        val supercomboProbability: Float?,
+    )
+
 
     private val tracks =
         ArrayList<Track>()
@@ -88,6 +97,15 @@ class AdasDecisionEngine {
     private var lastLdwVoiceMs =
         0L
 
+    // V4 distance fusion state.
+    private var fusedLeadTrackId: Int? = null
+    private var fusedDistanceEma = -1f
+    private var fusedPreviousDistance = -1f
+    private var fusedPreviousTimeMs = 0L
+    private var fusedClosingEma = 0f
+    private var fusedSource = "NONE"
+    private var lastScSampleTimestampMs = 0L
+
     // Lead-start state.
     private var stopTrackId:
         Int? =
@@ -118,6 +136,9 @@ class AdasDecisionEngine {
         speedKph: Float?,
         nowMs: Long,
         leadHint: SupercomboLeadHint? = null,
+        leadHintTimestampMs: Long = 0L,
+        useLeadHintForSelection: Boolean = true,
+        distanceMode: LeadDistanceMode = LeadDistanceMode.AUTO,
     ): AdasSnapshot {
         updateTracks(
             detections = detections,
@@ -139,7 +160,17 @@ class AdasDecisionEngine {
                 stable = stable,
                 lane = lane,
                 nowMs = nowMs,
+                leadHint =
+                    if (useLeadHintForSelection) leadHint else null,
+            )
+
+        val distanceDecision =
+            resolveLeadDistance(
+                track = leadTrack,
                 leadHint = leadHint,
+                leadHintTimestampMs = leadHintTimestampMs,
+                distanceMode = distanceMode,
+                nowMs = nowMs,
             )
 
         val vehicles =
@@ -151,9 +182,19 @@ class AdasDecisionEngine {
                     AdasVehicle(
                         trackId = track.id,
                         detection = track.detection,
-                        distanceMeters = track.distance,
+                        distanceMeters =
+                            if (track.id == leadTrack?.id) {
+                                distanceDecision?.distanceMeters ?: track.distance
+                            } else {
+                                track.distance
+                            },
                         closingSpeedMps =
-                            track.closingEma.coerceAtLeast(0f),
+                            if (track.id == leadTrack?.id) {
+                                distanceDecision?.closingSpeedMps
+                                    ?: track.closingEma.coerceAtLeast(0f)
+                            } else {
+                                track.closingEma.coerceAtLeast(0f)
+                            },
                         isLead =
                             track.id == leadTrack?.id,
                         stableFrames = track.hits,
@@ -280,6 +321,10 @@ class AdasDecisionEngine {
             lane = lane,
             hoodTopNorm = hoodTopNorm,
             warnings = warnings,
+            leadDistanceSource = distanceDecision?.source ?: "NONE",
+            leadYoloDistanceMeters = distanceDecision?.yoloDistanceMeters,
+            leadSupercomboDistanceMeters = distanceDecision?.supercomboDistanceMeters,
+            leadSupercomboProbability = distanceDecision?.supercomboProbability,
             debugText =
                 buildString {
                     append("tracks=")
@@ -729,6 +774,160 @@ class AdasDecisionEngine {
 
         track.previousTimeMs =
             nowMs
+    }
+
+    // -------------------------------------------------------------------------
+    // V4 Supercombo-primary lead distance fusion
+    // -------------------------------------------------------------------------
+
+    private fun resolveLeadDistance(
+        track: Track?,
+        leadHint: SupercomboLeadHint?,
+        leadHintTimestampMs: Long,
+        distanceMode: LeadDistanceMode,
+        nowMs: Long,
+    ): DistanceDecision? {
+        if (track == null) {
+            resetLeadDistanceFusion()
+            return null
+        }
+
+        val yolo = track.distance.takeIf { it.isFinite() && it in 2f..180f }
+        val probability = leadHint?.probability?.takeIf { it.isFinite() }
+        val sc = leadHint?.distanceMeters?.takeIf {
+            probability != null &&
+                probability >= SC_DISTANCE_MIN_PROB &&
+                it.isFinite() &&
+                it in 2f..180f
+        }
+
+        if (fusedLeadTrackId != track.id) {
+            resetLeadDistanceFusion()
+            fusedLeadTrackId = track.id
+        }
+
+        val scNew = sc != null &&
+            leadHintTimestampMs > 0L &&
+            leadHintTimestampMs != lastScSampleTimestampMs
+
+        val raw: Float?
+        val source: String
+
+        when (distanceMode) {
+            LeadDistanceMode.YOLO -> {
+                raw = yolo
+                source = "YOLO"
+            }
+
+            LeadDistanceMode.SUPERCOMBO -> {
+                if (sc != null) {
+                    raw = sc
+                    source = "SC"
+                } else {
+                    raw = yolo
+                    source = "YOLO-FB"
+                }
+            }
+
+            LeadDistanceMode.AUTO -> {
+                if (sc != null) {
+                    if (yolo != null) {
+                        val p = (probability ?: SC_DISTANCE_MIN_PROB)
+                            .coerceIn(SC_DISTANCE_MIN_PROB, 1f)
+                        var w = 0.80f +
+                            ((p - SC_DISTANCE_MIN_PROB) /
+                                (1f - SC_DISTANCE_MIN_PROB))
+                                .coerceIn(0f, 1f) * 0.15f
+
+                        val disagreement = abs(sc - yolo)
+                        if (disagreement > max(12f, sc * 0.65f)) {
+                            w = max(w, 0.93f)
+                        }
+
+                        raw = sc * w + yolo * (1f - w)
+                        source = "AUTO"
+                    } else {
+                        raw = sc
+                        source = "SC"
+                    }
+                } else {
+                    raw = yolo
+                    source = "YOLO-FB"
+                }
+            }
+        }
+
+        if (raw == null) return null
+
+        val usesSc = source == "SC" || source == "AUTO"
+        val newFamily = if (usesSc) "SC" else "YOLO"
+        val oldFamily = when {
+            fusedSource == "SC" || fusedSource == "AUTO" -> "SC"
+            fusedSource.startsWith("YOLO") -> "YOLO"
+            else -> "NONE"
+        }
+
+        if (oldFamily != "NONE" && newFamily != oldFamily) {
+            fusedPreviousDistance = -1f
+            fusedPreviousTimeMs = 0L
+            fusedClosingEma = 0f
+        }
+
+        val shouldUpdate = when {
+            distanceMode == LeadDistanceMode.YOLO -> true
+            !usesSc -> true
+            fusedDistanceEma <= 0f -> true
+            scNew -> true
+            else -> false
+        }
+
+        if (shouldUpdate) {
+            val old = fusedDistanceEma
+            fusedDistanceEma = if (old <= 0f) {
+                raw
+            } else {
+                val alpha = if (raw < old) 0.58f else 0.38f
+                old * (1f - alpha) + raw * alpha
+            }
+
+            if (fusedPreviousDistance > 0f && fusedPreviousTimeMs > 0L) {
+                val dt = (nowMs - fusedPreviousTimeMs) / 1000f
+                if (dt in 0.12f..2.2f) {
+                    val closing = (fusedPreviousDistance - fusedDistanceEma) / dt
+                    if (closing.isFinite() && abs(closing) <= 45f) {
+                        fusedClosingEma =
+                            fusedClosingEma * 0.64f + closing * 0.36f
+                    }
+                }
+            }
+
+            fusedPreviousDistance = fusedDistanceEma
+            fusedPreviousTimeMs = nowMs
+            fusedSource = source
+
+            if (scNew) {
+                lastScSampleTimestampMs = leadHintTimestampMs
+            }
+        }
+
+        return DistanceDecision(
+            distanceMeters = fusedDistanceEma.coerceIn(2f, 180f),
+            closingSpeedMps = fusedClosingEma.coerceAtLeast(0f),
+            source = fusedSource,
+            yoloDistanceMeters = yolo,
+            supercomboDistanceMeters = sc,
+            supercomboProbability = probability,
+        )
+    }
+
+    private fun resetLeadDistanceFusion() {
+        fusedLeadTrackId = null
+        fusedDistanceEma = -1f
+        fusedPreviousDistance = -1f
+        fusedPreviousTimeMs = 0L
+        fusedClosingEma = 0f
+        fusedSource = "NONE"
+        lastScSampleTimestampMs = 0L
     }
 
     // -------------------------------------------------------------------------

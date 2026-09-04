@@ -20,7 +20,7 @@ import android.widget.Switch
 import android.widget.TextView
 import java.util.Locale
 
-class V3SettingsDialog(
+class V4SettingsDialog(
     context: Context,
     private val licenseManager: AdasLicenseManager,
     private val voice: GoogleAdasVoice,
@@ -63,18 +63,18 @@ class V3SettingsDialog(
             textSize=28f; setTextColor(Color.WHITE); typeface=Typeface.DEFAULT_BOLD
         })
         root.addView(TextView(context).apply {
-            text="V3 • AI LAB"
+            text="V4 • SC DISTANCE FUSION"
             textSize=14f; setTextColor(Color.rgb(56,232,194)); typeface=Typeface.DEFAULT_BOLD
             setPadding(0,dp(2),0,dp(10))
         })
 
-        root.addView(section("PHÒNG THỬ AI"))
-        root.addView(body("Chọn 1 cấu hình để chạy cùng một cung đường. Mục tiêu là đo rõ Supercombo giúp hay làm giảm hiệu năng."))
+        root.addView(section("NGUỒN KHOẢNG CÁCH"))
+        root.addView(body("YOLO giữ Track ID; Supercombo ưu tiên khoảng cách. V4 AUTO dùng SC 80–95% + YOLO fallback."))
 
         val presets=LinearLayout(context).apply { orientation=LinearLayout.HORIZONTAL }
-        presets.addView(presetButton("BASELINE\nV2.4",Color.rgb(34,91,125)){ applyPreset(AdasFeatureConfig.baseline()) },weight())
-        presets.addView(presetButton("SUPERCOMBO\nONLY",Color.rgb(90,64,155)){ applyPreset(AdasFeatureConfig.supercombo()) },weight(8))
-        presets.addView(presetButton("HYBRID\nFUSION",Color.rgb(0,126,103)){ applyPreset(AdasFeatureConfig.hybrid()) },weight(8))
+        presets.addView(presetButton("V4 AUTO\nKHUYẾN NGHỊ",Color.rgb(0,126,103)){ applyPreset(AdasFeatureConfig.v4Auto()) },weight())
+        presets.addView(presetButton("SC\nPRIMARY",Color.rgb(90,64,155)){ applyPreset(AdasFeatureConfig.supercomboPrimary()) },weight(8))
+        presets.addView(presetButton("YOLO\nCHECK",Color.rgb(34,91,125)){ applyPreset(AdasFeatureConfig.yoloCheck()) },weight(8))
         root.addView(presets,LinearLayout.LayoutParams(-1,dp(72)).apply{topMargin=dp(10)})
 
         root.addView(section("BẬT / TẮT TỪNG THÀNH PHẦN"))
@@ -88,7 +88,7 @@ class V3SettingsDialog(
         addToggle(root,"LDW + TLC","Bíp/TTS cảnh báo lệch làn.",config.ldwTlc){ update(config.copy(ldwTlc=it)) }
         addToggle(root,"Thông tin kỹ thuật","Hiện raw UFLD, horizon và số ms Supercombo.",config.technicalInfo){ update(config.copy(technicalInfo=it)) }
 
-        root.addView(section("ĐO HIỆU QUẢ"))
+        root.addView(section("SO SÁNH KHOẢNG CÁCH"))
         metricsText=body(metricsProvider()).apply {
             setTextColor(Color.rgb(174,228,220)); typeface=Typeface.MONOSPACE
             background=rounded(Color.rgb(12,27,36),18f)
@@ -152,14 +152,14 @@ class V3SettingsDialog(
         voiceRow2.addView(smallAction("LỆCH LÀN"){voice.laneDeparture()},weight(8))
         root.addView(voiceRow2,LinearLayout.LayoutParams(-1,dp(52)).apply{topMargin=dp(7)})
 
-        root.addView(section("CÁCH TEST V3"))
+        root.addView(section("CÁCH TEST V4"))
         root.addView(infoCard("1 • BASELINE","Chạy cùng đoạn đường với YOLOX + UFLD. Ghi cảm nhận độ ổn định lane, lead và nhiệt máy."))
         root.addView(infoCard("2 • SUPERCOMBO","Chạy lại cùng đoạn đường. Quan sát path cong, road edge, lead advisor và số ms SC."))
         root.addView(infoCard("3 • HYBRID","Chạy lần ba. Smart Lead dùng YOLOX tracking + hint Supercombo; lane dùng dữ liệu kết hợp khi cả hai hợp lệ."))
         root.addView(infoCard("4 • SO SÁNH","Nếu Supercombo làm lane/lead tốt hơn nhưng inference quá chậm, ta giảm tần suất hoặc chỉ dùng Lead/Path cần thiết ở bản sau."))
 
         root.addView(TextView(context).apply {
-            text="V3 AI LAB là bản thử nghiệm. Supercombo dùng camera đơn và preprocessing điện thoại xấp xỉ openpilot; không coi khoảng cách/TTC là đo lường an toàn được chứng nhận."
+            text="V4 ưu tiên Supercombo distance nhưng vẫn là ADAS camera đơn thử nghiệm. Supercombo dùng camera đơn và preprocessing điện thoại xấp xỉ openpilot; không coi khoảng cách/TTC là đo lường an toàn được chứng nhận."
             textSize=13f; setTextColor(Color.rgb(255,190,72)); setPadding(0,dp(16),0,0)
         })
         root.addView(action("ĐÓNG CÀI ĐẶT").apply{setOnClickListener{dismiss()}},buttonParams(18))
