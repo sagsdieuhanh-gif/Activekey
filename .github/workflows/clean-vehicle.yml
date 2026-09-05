@@ -98,5 +98,5 @@ jobs:
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --title "TrungKien ADAS ${VERSION_NAME}" --notes "V4.3 SPC core + UFLD actual-lane rendering + SSD-MobileNet object labels. YOLO runtime/model remains removed."
+            gh release create "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --title "TrungKien ADAS ${VERSION_NAME}" --notes "V4.3.1 crash-safe startup, V4 icon, horizontal modern settings, corrected SSD output parser. YOLO remains removed."
           fi
