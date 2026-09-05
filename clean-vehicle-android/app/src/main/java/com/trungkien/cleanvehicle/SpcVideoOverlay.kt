@@ -15,6 +15,8 @@ class SpcVideoOverlay(context:Context):View(context){
     @Volatile private var fps=0f
     @Volatile private var pairMs=0L
     @Volatile private var technical=false
+    @Volatile private var ufld:LaneResult?=null
+    @Volatile private var objects:RoadObjectResult?=null
     private var calUntil=0L; private var movedUntil=0L
     private val d=resources.displayMetrics.density; private val sd=resources.displayMetrics.scaledDensity
     private val corridor=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.FILL;color=Color.argb(95,83,232,176)}
@@ -25,6 +27,10 @@ class SpcVideoOverlay(context:Context):View(context){
     private val lead=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.FILL;color=Color.rgb(255,185,43)}
     private val leadBox=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.STROKE;strokeWidth=4f*d;strokeCap=Paint.Cap.ROUND;color=Color.rgb(255,174,24)}
     private val leadTxt=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.rgb(255,205,92);textAlign=Paint.Align.CENTER;typeface=Typeface.DEFAULT_BOLD}
+    private val objBox=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.STROKE;strokeWidth=3f*d;color=Color.rgb(255,193,7)}
+    private val objLeadBox=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.STROKE;strokeWidth=5f*d;color=Color.rgb(255,94,77)}
+    private val objLabelBg=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.FILL;color=Color.argb(210,7,22,25)}
+    private val objLabel=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.WHITE;typeface=Typeface.DEFAULT_BOLD}
     private val hudBg=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(172,9,21,25)}
     private val dist=Paint(Paint.ANTI_ALIAS_FLAG).apply{textAlign=Paint.Align.CENTER;typeface=Typeface.DEFAULT_BOLD}
     private val speed=Paint(Paint.ANTI_ALIAS_FLAG).apply{textAlign=Paint.Align.CENTER;typeface=Typeface.DEFAULT_BOLD;color=Color.WHITE}
@@ -35,20 +41,16 @@ class SpcVideoOverlay(context:Context):View(context){
     private val success=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.argb(222,0,126,86)}
     private val banner=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.WHITE;textAlign=Paint.Align.CENTER;typeface=Typeface.DEFAULT_BOLD}
 
-    fun update(r:SupercomboResult?,s:AdasSnapshot,v:VirtualCameraState,t:AdasThermalState,cameraFps:Float,pair:Long,tech:Boolean){
-        result=r;snapshot=s;virtual=v;thermal=t;fps=cameraFps;pairMs=pair;technical=tech
+    fun update(r:SupercomboResult?,s:AdasSnapshot,v:VirtualCameraState,t:AdasThermalState,cameraFps:Float,pair:Long,tech:Boolean,laneResult:LaneResult?,objectResult:RoadObjectResult?){
+        result=r;snapshot=s;virtual=v;thermal=t;fps=cameraFps;pairMs=pair;technical=tech;ufld=laneResult;objects=objectResult
         if(s.warnings.leadMovedEvent)movedUntil=SystemClock.elapsedRealtime()+2800L
         postInvalidateOnAnimation()
     }
     fun showCalibrationSuccess(){calUntil=SystemClock.elapsedRealtime()+3000L;postInvalidateOnAnimation()}
-    override fun onDraw(c:Canvas){super.onDraw(c);result?.let{drawRoad(c,it)};drawHud(c);if(technical){drawDebug(c);drawHorizon(c)};drawWarnings(c);drawThermal(c)}
+    override fun onDraw(c:Canvas){super.onDraw(c);result?.let{drawRoad(c,it)};drawObjects(c);drawHud(c);if(technical){drawDebug(c);drawHorizon(c)};drawWarnings(c);drawThermal(c)}
 
     private fun drawRoad(c:Canvas,r:SupercomboResult){
-        val l=r.laneLines.getOrNull(1).orEmpty().map{it.copy(lateralMeters=SupercomboLaneSanity.sanitizedLateral(r,it,true))}.mapNotNull{project(it,r)}; val rr=r.laneLines.getOrNull(2).orEmpty().map{it.copy(lateralMeters=SupercomboLaneSanity.sanitizedLateral(r,it,false))}.mapNotNull{project(it,r)}
-        if(l.size>=4&&rr.size>=4&&r.laneProbabilities.getOrElse(1){0f}>=0.20f&&r.laneProbabilities.getOrElse(2){0f}>=0.20f){
-            val n=minOf(l.size,rr.size); val p=Path();p.moveTo(l[0].first,l[0].second);for(i in 1 until n)p.lineTo(l[i].first,l[i].second);for(i in n-1 downTo 0)p.lineTo(rr[i].first,rr[i].second);p.close();c.drawPath(p,corridor)
-            poly(c,l,if(snapshot.warnings.ldwWarning&&snapshot.warnings.ldwDirection<0)danger else lane);poly(c,rr,if(snapshot.warnings.ldwWarning&&snapshot.warnings.ldwDirection>0)danger else lane)
-        }
+        drawUfldEgoLane(c,ufld)
         drawPathFill(c,r)
         if(technical)for(e in r.roadEdges)poly(c,e.mapNotNull{project(it,r)},edge)
         val verified=snapshot.lead?:return;val h=r.leadHint?.takeIf{it.distanceMeters in 2f..200f}?:return;if(snapshot.debugText.startsWith("DROP_"))return
@@ -56,6 +58,90 @@ class SpcVideoOverlay(context:Context):View(context){
         val a=project(SupercomboPoint(far,h.lateralMeters+hw),r)?:return;val b=project(SupercomboPoint(far,h.lateralMeters-hw),r)?:return;val cc=project(SupercomboPoint(near,h.lateralMeters-hw),r)?:return;val e=project(SupercomboPoint(near,h.lateralMeters+hw),r)?:return
         val p=Path();p.moveTo(a.first,a.second);p.lineTo(b.first,b.second);p.lineTo(cc.first,cc.second);p.lineTo(e.first,e.second);p.close();c.drawPath(p,lead);drawLeadReticle(c,r,h)
     }
+    private fun drawUfldEgoLane(c:Canvas,lr:LaneResult?){
+        lr?:return
+        if(lr.confidence.getOrElse(1){0f}<0.42f||lr.confidence.getOrElse(2){0f}<0.42f)return
+        val leftRaw=lr.lanes.getOrNull(1).orEmpty().filter{it.y>=maxOf(virtual.horizonNorm+0.025f,0.47f)&&it.y<=0.985f}
+        val rightRaw=lr.lanes.getOrNull(2).orEmpty().filter{it.y>=maxOf(virtual.horizonNorm+0.025f,0.47f)&&it.y<=0.985f}
+        if(leftRaw.size<4||rightRaw.size<4)return
+        val refY=0.72f
+        val lx=nearestLaneX(leftRaw,refY)?:return
+        val rx=nearestLaneX(rightRaw,refY)?:return
+        val widthNorm=rx-lx
+        val centerNorm=(lx+rx)*0.5f
+        if(lx>=0.49f||rx<=0.51f||widthNorm !in 0.12f..0.58f||centerNorm !in 0.30f..0.70f)return
+        val l=leftRaw.map{norm(it.x,it.y,lr.sourceWidth,lr.sourceHeight)}
+        val rr=rightRaw.map{norm(it.x,it.y,lr.sourceWidth,lr.sourceHeight)}
+        val n=minOf(l.size,rr.size)
+        if(n>=4){
+            val p=Path()
+            p.moveTo(l[0].first,l[0].second)
+            for(i in 1 until n)p.lineTo(l[i].first,l[i].second)
+            for(i in n-1 downTo 0)p.lineTo(rr[i].first,rr[i].second)
+            p.close()
+            c.drawPath(p,corridor)
+        }
+        poly(c,l,if(snapshot.warnings.ldwWarning&&snapshot.warnings.ldwDirection<0)danger else lane)
+        poly(c,rr,if(snapshot.warnings.ldwWarning&&snapshot.warnings.ldwDirection>0)danger else lane)
+    }
+
+    private fun nearestLaneX(points:List<LanePoint>,targetY:Float):Float?{
+        if(points.isEmpty())return null
+        var best:LanePoint?=null
+        var delta=Float.MAX_VALUE
+        for(p in points){
+            val d0=kotlin.math.abs(p.y-targetY)
+            if(d0<delta){delta=d0;best=p}
+        }
+        return best?.x
+    }
+
+    private fun drawObjects(c:Canvas){
+        val o=objects?:return
+        val r=result
+        val leadIndex=if(r!=null)bestLeadObjectIndex(o,r) else -1
+        for((index,det) in o.detections.withIndex()){
+            val a=norm(det.left,det.top,o.sourceWidth,o.sourceHeight)
+            val b=norm(det.right,det.bottom,o.sourceWidth,o.sourceHeight)
+            val rect=RectF(minOf(a.first,b.first),minOf(a.second,b.second),maxOf(a.first,b.first),maxOf(a.second,b.second))
+            val matched=index==leadIndex&&snapshot.lead!=null
+            c.drawRect(rect,if(matched)objLeadBox else objBox)
+            val distanceText=if(matched) snapshot.lead?.distanceMeters?.let{" • LEAD ${String.format(Locale.US,"%.1f m",it)}"}?:"" else ""
+            val text="${det.label} ${(det.score*100f).toInt()}%$distanceText"
+            objLabel.textSize=12.5f*sd
+            val pad=5f*d
+            val textW=objLabel.measureText(text)
+            val h=21f*d
+            val top=(rect.top-h).coerceAtLeast(0f)
+            c.drawRoundRect(RectF(rect.left,top,rect.left+textW+pad*2,top+h),4f*d,4f*d,objLabelBg)
+            c.drawText(text,rect.left+pad,top+15f*d,objLabel)
+        }
+    }
+
+    private fun bestLeadObjectIndex(o:RoadObjectResult,r:SupercomboResult):Int{
+        val v=snapshot.lead?:return -1
+        if(snapshot.debugText.startsWith("DROP_"))return -1
+        val h=r.leadHint?:return -1
+        val p=project(SupercomboPoint(v.distanceMeters,h.lateralMeters,0f),r)?:return -1
+        var best=-1
+        var bestCost=Float.MAX_VALUE
+        for((index,det) in o.detections.withIndex()){
+            if(det.classId !in intArrayOf(2,3,4,6,8))continue
+            val a=norm(det.left,det.top,o.sourceWidth,o.sourceHeight)
+            val b=norm(det.right,det.bottom,o.sourceWidth,o.sourceHeight)
+            val left=minOf(a.first,b.first);val right=maxOf(a.first,b.first)
+            val top=minOf(a.second,b.second);val bottom=maxOf(a.second,b.second)
+            val bw=(right-left).coerceAtLeast(1f)
+            if(p.first<left-bw*.35f||p.first>right+bw*.35f)continue
+            val dx=kotlin.math.abs(p.first-(left+right)*.5f)/width.coerceAtLeast(1)
+            val dy=kotlin.math.abs(p.second-bottom)/height.coerceAtLeast(1)
+            if(dy>0.22f)continue
+            val cost=dx+dy*.8f
+            if(cost<bestCost){bestCost=cost;best=index}
+        }
+        return best
+    }
+
     private fun drawLeadReticle(c:Canvas,r:SupercomboResult,h:SupercomboLeadHint){
         val distNow=snapshot.lead?.distanceMeters?:h.distanceMeters
         val ground=project(SupercomboPoint(distNow,h.lateralMeters,0f),r)?:return
@@ -70,7 +156,7 @@ class SpcVideoOverlay(context:Context):View(context){
         ln(cx-half,cy+half,cx-half+corner,cy+half);ln(cx-half,cy+half,cx-half,cy+half-corner)
         ln(cx+half,cy+half,cx+half-corner,cy+half);ln(cx+half,cy+half,cx+half,cy+half-corner)
         leadTxt.textSize=12.5f*sd
-        c.drawText("SPC ${String.format(Locale.US,"%.1f m",distNow)} • ${(h.probability*100f).toInt()}%",cx,cy-half-8f*d,leadTxt)
+        c.drawText("SPC LEAD ${String.format(Locale.US,"%.1f m",distNow)} • ${(h.probability*100f).toInt()}%",cx,cy-half-8f*d,leadTxt)
     }
 
     private fun drawPathFill(c:Canvas,r:SupercomboResult){val l=ArrayList<Pair<Float,Float>>();val rr=ArrayList<Pair<Float,Float>>();for(q in r.path){if(q.forwardMeters !in 3f..120f)continue;val a=project(q.copy(lateralMeters=q.lateralMeters+0.45f),r);val b=project(q.copy(lateralMeters=q.lateralMeters-0.45f),r);if(a!=null&&b!=null){l+=a;rr+=b}};if(l.size<4)return;val p=Path();p.moveTo(l[0].first,l[0].second);for(i in 1 until l.size)p.lineTo(l[i].first,l[i].second);for(i in rr.size-1 downTo 0)p.lineTo(rr[i].first,rr[i].second);p.close();c.drawPath(p,center)}
@@ -81,7 +167,8 @@ class SpcVideoOverlay(context:Context):View(context){
         "pitch ${String.format(Locale.US,"%.2f",virtual.pitchDeg)}° yaw ${String.format(Locale.US,"%.2f",virtual.yawDeg)}° CALIBRATED ${(virtual.calibrationQuality*100).toInt()}%",
         "fPx ${virtual.focalPx.toInt()} (r ${String.format(Locale.US,"%.3f",virtual.fxRatio)}) | horizon ${(virtual.horizonNorm*virtual.sourceHeight).toInt()} | big virtual",
         "lane ${String.format(Locale.US,"%.2f",p.getOrElse(0){0f})} ${String.format(Locale.US,"%.2f",p.getOrElse(1){0f})} ${String.format(Locale.US,"%.2f",p.getOrElse(2){0f})} ${String.format(Locale.US,"%.2f",p.getOrElse(3){0f})} | conf ${String.format(Locale.US,"%.2f",conf)}",
-        "lead raw ${r?.leadHint?.distanceMeters?.let{String.format(Locale.US,"%.1fm",it)}?:"--"} p=${r?.leadHint?.probability?.let{"${(it*100).toInt()}%"}?:"--"} | ${snapshot.debugText}")
+        "lead raw ${r?.leadHint?.distanceMeters?.let{String.format(Locale.US,"%.1fm",it)}?:"--"} p=${r?.leadHint?.probability?.let{"${(it*100).toInt()}%"}?:"--"} | ${snapshot.debugText}",
+        "UFLD lane ${ufld?.confidence?.getOrElse(1){0f}?.let{String.format(Locale.US,"%.2f",it)}?:"--"}/${ufld?.confidence?.getOrElse(2){0f}?.let{String.format(Locale.US,"%.2f",it)}?:"--"} | OBJ ${objects?.detections?.size?:0} ${objects?.inferenceMs?.toInt()?:0}ms")
         var mw=0f;for(s in lines)mw=max(mw,dbg.measureText(s));val pad=8f*d;val lh=21f*d;val l=6f*d;val t=6f*d;c.drawRoundRect(RectF(l,t,l+mw+2*pad,t+lh*lines.size+pad),8f*d,8f*d,dbgBg);var y=t+19f*d;for(s in lines){c.drawText(s,l+pad,y,dbg);y+=lh}}
     private fun drawHorizon(c:Canvas){if(!virtual.ready)return;val y=norm(0.5f,virtual.horizonNorm).second;c.drawLine(0f,y,width.toFloat(),y,hz);dbg.textSize=10.5f*sd;c.drawText("model horizon",7f*d,y-4f*d,dbg)}
     private fun drawWarnings(c:Canvas){val now=SystemClock.elapsedRealtime();val text=when{snapshot.warnings.fcwLevel>=3->"NGUY CƠ VA CHẠM";snapshot.warnings.hmwWarning->"KHOẢNG CÁCH QUÁ GẦN";snapshot.warnings.ldwWarning->"CHÚ Ý LỆCH LÀN";now<movedUntil->"XE PHÍA TRƯỚC DI CHUYỂN";now<calUntil->"HIỆU CHỈNH CAMERA THÀNH CÔNG";else->null}?:return;banner.textSize=19f*sd;val bw=banner.measureText(text)+34f*d;val bh=43f*d;val l=(width-bw)/2f;val t=height-62f*d;c.drawRoundRect(RectF(l,t,l+bw,t+bh),12f*d,12f*d,if(snapshot.warnings.fcwLevel>=3||snapshot.warnings.hmwWarning||snapshot.warnings.ldwWarning)warn else success);c.drawText(text,width/2f,t+29f*d,banner)}

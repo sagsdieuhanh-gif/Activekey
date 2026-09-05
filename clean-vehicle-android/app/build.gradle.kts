@@ -33,8 +33,8 @@ android {
         applicationId = "com.trungkien.adas"
         minSdk = 24
         targetSdk = 36
-        versionCode = 4220
-        versionName = "4.2.2"
+        versionCode = 4300
+        versionName = "4.3.0"
 
         ndk {
             abiFilters += "arm64-v8a"

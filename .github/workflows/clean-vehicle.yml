@@ -26,7 +26,7 @@ jobs:
           gradle-version: '8.13'
       - name: Install Android SDK
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
-      - name: Download SPC and calibration models
+      - name: Download SPC, UFLD and SSD object models
         shell: bash
         run: |
           set -euo pipefail
@@ -41,6 +41,9 @@ jobs:
           curl -L --fail --retry 5 --connect-timeout 30 "https://raw.githubusercontent.com/take1014/openpilot-runner/5f0ac7695125ed2d7a240a3814d7da1f839f3bc3/models/supercombo.onnx" -o clean-vehicle-android/app/src/main/assets/supercombo.onnx
           test "$(stat -c%s clean-vehicle-android/app/src/main/assets/supercombo.onnx)" = "57554657"
           sha256sum clean-vehicle-android/app/src/main/assets/supercombo.onnx
+          curl -L --fail --retry 5 --connect-timeout 30 "https://huggingface.co/onnxmodelzoo/ssd_mobilenet_v1_12-int8/resolve/929618539097dbeb779c13aed75dfe346d016d48/ssd_mobilenet_v1_12-int8.onnx?download=true" -o clean-vehicle-android/app/src/main/assets/ssd_mobilenet_v1_12_int8.onnx
+          test "$(stat -c%s clean-vehicle-android/app/src/main/assets/ssd_mobilenet_v1_12_int8.onnx)" = "9540809"
+          echo "2b79e6a7fb1ec6a33f332b9b10d82d9de4b7b49dcd26b5946921bb356895c954  clean-vehicle-android/app/src/main/assets/ssd_mobilenet_v1_12_int8.onnx" | sha256sum -c -
       - name: Restore stable signing key
         shell: bash
         env:
@@ -95,5 +98,5 @@ jobs:
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --title "TrungKien ADAS ${VERSION_NAME}" --notes "SPC CORE VIDEO MODE stable signed update. YOLO runtime/model removed."
+            gh release create "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --title "TrungKien ADAS ${VERSION_NAME}" --notes "V4.3 SPC core + UFLD actual-lane rendering + SSD-MobileNet object labels. YOLO runtime/model remains removed."
           fi
